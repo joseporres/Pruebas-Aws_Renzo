@@ -1409,6 +1409,8 @@ Resources:
               - cognito-idp:InitiateAuth
               - cognito-idp:ConfirmSignUp
               - cognito-idp:ResendConfirmationCode
+              - cognito-idp:AdminGetUser
+              - cognito-idp:ListUsers
             Resource: "*"
   SendEmailFunction:
     Type: AWS::Serverless::Function

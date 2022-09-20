@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/aws/aws-lambda-go/lambda"
 	"github.com/aws/aws-sdk-go/aws"
@@ -16,17 +17,31 @@ type deps struct {
 
 type CognitoClient interface {
 	SignUp(email string, password string) (string, error)
-	AdminCreateUser(email string) (string, error)
+	AdminCreateUser(email string) (string error)
 	AdminSetUserPassword(username string, password string) (string error)
 	SignIn(email string, password string) (string error)
 	ConfirmSignUp(email string, username string, confirmationCode string) (string error)
 	ResendConfirmationCode(email string, username string) (string error)
+	getUser(email string) ([]Response, error)
+	ListUsers() ([]Response, error)
+	AdminGetUser(username string) (string error)
 }
 
 type awsCognitoClient struct {
 	cognitoClient *cognito.CognitoIdentityProvider
 	appClientId   string
 	userPoolId    string
+}
+
+type Response struct {
+	Username            string    `json:"username"`
+	Enabled             bool      `json:"enabled"`
+	AccountStatus       string    `json:"accountStatus"`
+	Email               string    `json:"email"`
+	EmailVerified       string    `json:"emailVerified"`
+	PhoneNumberVerified string    `json:"phoneNumberVerified"`
+	Updated             time.Time `json:"updated"`
+	Created             time.Time `json:"created"`
 }
 
 type Event struct {
@@ -73,6 +88,12 @@ func (d *deps) handler(ctx context.Context, event Event) (string, error) {
 		client.ResendConfirmationCode(event.Email, event.Password)
 	case 5: // ConfirmSignUp
 		client.ConfirmSignUp(event.Email, event.Username, event.ConfirmationCode)
+	case 6: // GetUser
+		client.getUser(event.Email)
+	case 7: // ListUsers
+		client.ListUsers()
+	case 8: // AdminGetUser
+		client.AdminGetUser(event.Username)
 	}
 
 	fmt.Print(client)
@@ -202,4 +223,83 @@ func (ctx *awsCognitoClient) ResendConfirmationCode(email string, username strin
 		return "", err
 	}
 	return result.String(), nil
+}
+
+func (ctx *awsCognitoClient) getUser(email string) ([]Response, error) {
+
+	user := &cognito.ListUsersInput{
+		Filter:     aws.String("email = \"" + email + "\""),
+		UserPoolId: aws.String(ctx.userPoolId),
+	}
+
+	result, err := ctx.cognitoClient.ListUsers(user)
+
+	if err != nil {
+		fmt.Println("Got error listing users")
+		os.Exit(1)
+	}
+
+	var response []Response
+	for _, user := range result.Users {
+		fmt.Println("user: ", user)
+		response = append(response, Response{
+			Username:      *user.Username,
+			Enabled:       *user.Enabled,
+			AccountStatus: *user.UserStatus,
+			Email:         *user.Attributes[0].Value,
+			Updated:       *user.UserLastModifiedDate,
+			Created:       *user.UserCreateDate,
+		})
+	}
+
+	return response, nil
+
+}
+
+func (ctx *awsCognitoClient) ListUsers() ([]Response, error) {
+
+	user := &cognito.ListUsersInput{
+		UserPoolId: aws.String(ctx.userPoolId),
+	}
+
+	result, err := ctx.cognitoClient.ListUsers(user)
+
+	if err != nil {
+		fmt.Println("Got error listing users")
+		os.Exit(1)
+	}
+
+	var response []Response
+	for _, user := range result.Users {
+		fmt.Println("user: ", user)
+		response = append(response, Response{
+			Username:      *user.Username,
+			Enabled:       *user.Enabled,
+			AccountStatus: *user.UserStatus,
+			Updated:       *user.UserLastModifiedDate,
+			Created:       *user.UserCreateDate,
+		})
+	}
+
+	return response, nil
+}
+
+func (ctx *awsCognitoClient) AdminGetUser(username string) (string, error) {
+
+	user := &cognito.AdminGetUserInput{
+		UserPoolId: aws.String(ctx.userPoolId),
+		Username:   aws.String(username),
+	}
+
+	result, err := ctx.cognitoClient.AdminGetUser(user)
+
+	if err != nil {
+		fmt.Println("Got error listing users")
+		os.Exit(1)
+	}
+
+	fmt.Println(result)
+
+	return result.String(), nil
+
 }
