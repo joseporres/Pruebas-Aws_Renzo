@@ -1,2 +1,4 @@
 *.sum
 *.mod
+/.aws-sam
+/.vscode
