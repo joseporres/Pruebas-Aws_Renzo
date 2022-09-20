@@ -69,7 +69,7 @@ func (d *deps) handler(ctx context.Context, event Event) (string, error) {
 		client.AdminSetUserPassword(event.Username, event.Password)
 	case 3: // SignIn
 		client.SignIn(event.Email, event.Password)
-	case 4: // SignIn
+	case 4: // ResendConfirmationCode
 		client.ResendConfirmationCode(event.Email, event.Password)
 	case 5: // ConfirmSignUp
 		client.ConfirmSignUp(event.Email, event.Username, event.ConfirmationCode)

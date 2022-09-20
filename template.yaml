@@ -1404,8 +1404,12 @@ Resources:
             Effect: Allow
             Action: 
               - cognito-idp:AdminCreateUser
+              - cognito-idp:AdminSetUserPassword
+              - cognito-idp:SignUp
+              - cognito-idp:InitiateAuth
+              - cognito-idp:ConfirmSignUp
+              - cognito-idp:ResendConfirmationCode
             Resource: "*"
-
   SendEmailFunction:
     Type: AWS::Serverless::Function
     Properties:
