@@ -1,0 +1,688 @@
+Description: AWSAppSync Patterns Blog Infrastructure
+Parameters:
+  DdbPostTableGSI1:
+    Type: String
+    Description: Post Table global secondary index name
+    Default: userId-index
+Resources:
+  # ----------------------------------------------------------
+  # create dynamodb tables
+  DdbUsersTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: "users"
+      ProvisionedThroughput: 
+        ReadCapacityUnits: 2
+        WriteCapacityUnits: 2
+      AttributeDefinitions:
+        -
+          AttributeName: "userId"
+          AttributeType: "S"
+      KeySchema:
+        -
+          AttributeName: "userId"
+          KeyType: "HASH"
+  DdbPostsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: "posts"
+      ProvisionedThroughput: 
+        ReadCapacityUnits: 2
+        WriteCapacityUnits: 2
+      AttributeDefinitions:
+        -
+          AttributeName: "userId"
+          AttributeType: "S"
+        -
+          AttributeName: "postId"
+          AttributeType: "S"
+      KeySchema:
+        -
+          AttributeName: "postId"
+          KeyType: "HASH"
+      GlobalSecondaryIndexes:
+        - 
+          IndexName: !Ref DdbPostTableGSI1
+          KeySchema: 
+            - 
+              AttributeName: "userId"
+              KeyType: "HASH"
+          Projection:
+            ProjectionType: "ALL"
+          ProvisionedThroughput:
+            ReadCapacityUnits: 2
+            WriteCapacityUnits: 2
+  # ----------------------------------------------------------
+  # create lambda resources
+  AppsyncResolverLambdaPermissionPolicy:
+    Type: 'AWS::Lambda::Permission'
+    Properties:
+      FunctionName: !Ref AppsyncResolverLambda
+      Action: 'lambda:InvokeFunction'
+      Principal: "appsync.amazonaws.com"
+  AppsyncResolverLambdaExecutionRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path : "/"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: 'allow_s3'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+            - Effect: Allow
+              Action:
+              - s3:GetObject
+              - s3:PutObject
+              Resource: 
+                Fn::Join: 
+                  - ""
+                  - 
+                    - "arn:aws:s3:::"
+                    - !Ref S3BucketBlogPostContent
+                    - "/*"
+  AppsyncResolverLambda:
+    Type: 'AWS::Lambda::Function'
+    DependsOn: AppsyncResolverLambdaExecutionRole
+    Properties:
+      Runtime: nodejs12.x
+      Timeout: 30
+      Description: 'AppSync  post content from S3'
+      FunctionName: 'appsync-direct-lambda-resolver-function'
+      Handler: 'index.handler'
+      Role: !GetAtt AppsyncResolverLambdaExecutionRole.Arn
+      Environment:
+        Variables:
+          CONTENT_BUCKET: !Ref S3BucketBlogPostContent
+      Code:
+        ZipFile: |
+          const AWS = require('aws-sdk');
+          const s3 = new AWS.S3();
+          const bucketName = process.env.CONTENT_BUCKET;
+
+          exports.handler = async (event, context) => {
+              //console.log('Event: ' + JSON.stringify(event));
+              //console.log('Context: ' + JSON.stringify(context));
+              //console.log('Bucket: ' + bucketName);
+              
+              // we don't need to validate event.prev object or event.prev.result.items length
+              // because get_post_content_s3_key pipeline function only passes control over to Direct Lambda
+              // Resolver when DynamoDB Query operation returns exactly one valid result.  As per our
+              // DynamoDB Post schema, there should never be multiple rows for a given userId and postId
+
+              let resp = {};
+              try {
+                // create contents in s3 bucket
+                if (event.info.fieldName === 'createPostContent') {
+                    if (!event.arguments.input.postId || !event.arguments.input.content) {
+                        const errorMessage = 'missing required parameters in createPostContent';
+                        console.error('Exception occurred: ', errorMessage);
+                        throw new Error(errorMessage);
+                    }
+                    const params = {
+                        Body: event.arguments.input.content,
+                        ContentType: 'text/plain',
+                        Bucket: bucketName,
+                        Key: event.prev.result.items[0].userId + '/' + event.arguments.input.postId
+                    };
+                    console.log('Creating object in bucket: ' + bucketName + ', s3 params: ' + JSON.stringify(params));
+                    const data = await s3.putObject(params).promise();
+                    resp = {
+                        etag: data.ETag 
+                    };
+                }
+                // get contents from s3 bucket
+                else if(event.info.fieldName === 'getPostContent') {
+                    if (!event.arguments.input.postId) {
+                        const errorMessage = 'missing required parameters in getPostContent';
+                        console.error('Exception occurred: ', errorMessage);
+                        throw new Error(errorMessage);
+                    }
+                    const params = {
+                      Bucket: bucketName,
+                      Key: event.prev.result.items[0].userId + '/' + event.arguments.input.postId
+                    };
+                    console.log('Retrieving object from bucket: ' + bucketName + ', s3 params: ' + JSON.stringify(params));
+                    const data = await s3.getObject(params).promise();
+                    const content = data.Body.toString('utf-8');
+                    resp = {
+                        content: content
+                    };
+                }
+                else {
+                    const errorMessage = 'unsupported operation' + event.info.fieldName;
+                    console.error('Exception occurred: ', errorMessage);
+                    throw new Error(errorMessage);
+                }
+              }
+              catch (ex) {
+                console.error('Exception occurred: ', ex.message);
+                const promise = new Promise((resolve, reject) => {
+                  reject(ex.message);
+                });
+                return promise;
+              }
+
+              return resp;
+          };
+  # ----------------------------------------------------------
+  # create cogito resources
+  SNSRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+        - Effect: "Allow"
+          Principal:
+            Service:
+            - "cognito-idp.amazonaws.com"
+          Action:
+          - "sts:AssumeRole"
+      Policies:
+      - PolicyName: "CognitoSNSPolicy"
+        PolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+          - Effect: "Allow"
+            Action: "sns:publish"
+            Resource: "*"
+          - Effect: "Deny"
+            Action: "sns:publish"
+            Resource: "arn:aws:sns:*:*:*"
+  UserPool:
+    Type: "AWS::Cognito::UserPool"
+    Properties:
+      UserPoolName: appsync-patterns-blog-user-pool
+      AutoVerifiedAttributes:
+      - email
+      MfaConfiguration: "OPTIONAL"
+      SmsConfiguration:
+        ExternalId: appsync-patterns-blog-external
+        SnsCallerArn: !GetAtt SNSRole.Arn
+      Schema:
+      - Name: email
+        AttributeDataType: String
+        Mutable: true
+        Required: true
+  UserPoolClient:
+    Type: "AWS::Cognito::UserPoolClient"
+    Properties:
+      ClientName: appsync-patterns-blog-client
+      GenerateSecret: false
+      UserPoolId: !Ref UserPool
+      AllowedOAuthFlows:
+      - code
+      AllowedOAuthFlowsUserPoolClient: true
+      AllowedOAuthScopes:
+      - email
+      - phone
+      - openid
+      CallbackURLs:
+      - https://aws.amazon.com/cognito/
+      LogoutURLs:
+      - https://aws.amazon.com/cognito/
+      DefaultRedirectURI: https://aws.amazon.com/cognito/
+      ExplicitAuthFlows:
+      - ALLOW_USER_PASSWORD_AUTH
+      - ALLOW_USER_SRP_AUTH
+      - ALLOW_REFRESH_TOKEN_AUTH
+      PreventUserExistenceErrors: ENABLED
+      SupportedIdentityProviders:
+      - COGNITO
+
+  UserPoolDomain:
+    Type: AWS::Cognito::UserPoolDomain
+    Properties: 
+      Domain: !Sub 'appsync-patterns-blog-${AWS::AccountId}'
+      UserPoolId: !Ref UserPool
+  # ----------------------------------------------------------
+  # create appsync resources
+  AppSyncIamRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      RoleName: IamRoleForAppSyncToDynamoDB
+      Description: Allow AppSync to access DynamoDB tabes
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - appsync.amazonaws.com 
+            Action:
+              - 'sts:AssumeRole'
+      Policies:
+        - PolicyName: AllowAccessForAppsyncResolvers
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:Query
+                - dynamodb:Scan
+                - dynamodb:UpdateItem
+                Resource: 
+                - !Join
+                  - ''
+                  - - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/'
+                    - !Ref DdbUsersTable
+                    - '*'
+                - !Join
+                  - ''
+                  - - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/'
+                    - !Ref DdbPostsTable
+                    - '*'
+              - Effect: Allow
+                Action:
+                - lambda:invokeFunction
+                Resource: 
+                  - !GetAtt AppsyncResolverLambda.Arn
+  GraphQLApi:
+    Type: AWS::AppSync::GraphQLApi
+    Properties:
+      Name: appsync-patterns-blog
+      AuthenticationType: AMAZON_COGNITO_USER_POOLS
+      UserPoolConfig:
+        AwsRegion: !Ref AWS::Region
+        DefaultAction: ALLOW
+        UserPoolId: !Ref UserPool
+      AdditionalAuthenticationProviders: 
+        - AuthenticationType: AWS_IAM
+  UsersDynamoDBTableDataSource:
+    Type: "AWS::AppSync::DataSource"
+    Properties:
+      ApiId: !GetAtt GraphQLApi.ApiId
+      Name: DdbUsersTable
+      Type: AMAZON_DYNAMODB
+      ServiceRoleArn: !GetAtt AppSyncIamRole.Arn
+      DynamoDBConfig:
+        AwsRegion: !Ref AWS::Region
+        TableName: !Ref DdbUsersTable          
+  PostsDynamoDBTableDataSource:
+    Type: "AWS::AppSync::DataSource"
+    Properties:
+      ApiId: !GetAtt GraphQLApi.ApiId
+      Name: PostsDynamoDBTable
+      Type: AMAZON_DYNAMODB
+      ServiceRoleArn: !GetAtt AppSyncIamRole.Arn
+      DynamoDBConfig:
+        AwsRegion: !Ref AWS::Region
+        TableName: !Ref DdbPostsTable                       
+  LambdaDataSource:
+    Type: "AWS::AppSync::DataSource"
+    Properties:
+      ApiId: !GetAtt GraphQLApi.ApiId
+      Name: S3BlogContent
+      Type: AWS_LAMBDA
+      ServiceRoleArn: !GetAtt AppSyncIamRole.Arn
+      LambdaConfig:
+        LambdaFunctionArn: !GetAtt AppsyncResolverLambda.Arn
+  S3BucketBlogPostContent:
+    Type: 'AWS::S3::Bucket'
+    Properties: {}
+  GraphQLSchema:
+    Type: "AWS::AppSync::GraphQLSchema"
+    Properties:
+      ApiId: !GetAtt GraphQLApi.ApiId
+      Definition: |
+        type Mutation {
+          createPost(input: CreatePostInput!): Post
+          createPostContent(input: CreatePostContentInput!): String
+        }
+        type Query {
+          getFriendsPosts: PostConnection
+          getPostContent(input: GetPostContentInput!): String
+        }
+        input CreatePostInput {
+          title: String!
+          content: String!
+        }
+        input CreatePostContentInput {
+          postId: ID!
+          content: String!
+        }
+        input GetPostContentInput {
+          postId: ID!
+        }
+        type Post {
+          userId: String!
+          postId: ID!
+          title: String!
+          content: String!
+        }
+        type SubscriptionDetails {
+          subscription_tier: String!
+          maxPosts: Int!
+        }
+        type User {
+          userId: String!
+          email: String!
+          name: String!
+          subscription: SubscriptionDetails
+          friends: [String]
+        }
+        type PostConnection {
+          items: [Post]
+          nextToken: String
+        }
+  # Usecase 1 - AppSync Pipeline Resolver - Mutation - createPost
+  CreatePostPipelineResolver:
+    Type: "AWS::AppSync::Resolver"
+    Properties:
+      ApiId: !GetAtt GraphQLApi.ApiId
+      TypeName: Mutation
+      FieldName: createPost 
+      Kind: PIPELINE
+      PipelineConfig: 
+        Functions:
+          - !GetAtt GetSubscriptionLimitFunction.FunctionId
+          - !GetAtt CheckNumberOfPostsAgainstLimitFunction.FunctionId
+          - !GetAtt CreatePostFunction.FunctionId
+      RequestMappingTemplate: "{}"
+      ResponseMappingTemplate: "$util.toJson($context.result)"  
+    DependsOn: GraphQLSchema
+  # AppSync Pipeline Resolver Function - get_subscription_limit
+  GetSubscriptionLimitFunction:
+    Type: AWS::AppSync::FunctionConfiguration 
+    Properties:
+      ApiId: !GetAtt GraphQLApi.ApiId
+      Name: get_subscription_limit
+      DataSourceName: !GetAtt UsersDynamoDBTableDataSource.Name
+      FunctionVersion: "2018-05-29"
+      RequestMappingTemplate: |
+        {
+            "version" : "2017-02-28",
+            "operation" : "GetItem",
+            "key" : {
+                "userId" : $util.dynamodb.toDynamoDBJson($context.identity.username)
+            }
+        }
+      ResponseMappingTemplate: |
+        #set($result = {})
+        #set($result.limit = $context.result.subscription.maxPosts)
+
+        #if($context.error)
+          $util.error($context.error.message, $context.error.type)
+        #end
+
+        $util.toJson($result) 
+  # AppSync Pipeline Resolver Function - check_number_of_posts_against_limit
+  CheckNumberOfPostsAgainstLimitFunction:
+    Type: AWS::AppSync::FunctionConfiguration 
+    Properties:
+      ApiId: !GetAtt GraphQLApi.ApiId
+      Name: check_number_of_posts_against_limit
+      DataSourceName: !GetAtt PostsDynamoDBTableDataSource.Name
+      FunctionVersion: "2018-05-29"
+      RequestMappingTemplate: |
+        {
+            "version": "2017-02-28",
+            "operation": "Scan",
+            "index": "userId-index",
+            "filter": {
+                "expression": "userId = :userId",
+                "expressionValues": {
+                    ":userId": $util.dynamodb.toDynamoDBJson($context.identity.username)
+                }
+            }
+        }
+      ResponseMappingTemplate: |
+        #set ($limit = $context.prev.result.limit)
+        #set ($count = $context.result.items.size())
+        #if ($limit <= $count)
+          $util.error("Posts Limit Reached: limit: ${limit}, posts by ${context.identity.username}: ${context.result.items.size()}")
+        #end
+
+        #if($context.error)
+          $util.error($context.error.message, $context.error.type)
+        #end
+
+        $util.toJson($result)
+  # AppSync Pipeline Resolver Function - create_post
+  CreatePostFunction:
+    Type: AWS::AppSync::FunctionConfiguration 
+    Properties:
+      ApiId: !GetAtt GraphQLApi.ApiId
+      Name: create_post
+      DataSourceName: !GetAtt PostsDynamoDBTableDataSource.Name
+      FunctionVersion: "2018-05-29"
+      RequestMappingTemplate: |
+        {
+            "version" : "2017-02-28",
+            "operation" : "PutItem",
+            "key" : {
+                "postId": $util.dynamodb.toDynamoDBJson($utils.autoId())
+            },
+            "attributeValues" : {
+                "userId" : $util.dynamodb.toDynamoDBJson($context.identity.username),
+                "title": $util.dynamodb.toDynamoDBJson($context.arguments.input.title),
+                "content": $util.dynamodb.toDynamoDBJson($context.arguments.input.content)
+            },
+            "condition": {
+                "expression": "attribute_not_exists(#postId) AND attribute_not_exists(#userId)",
+                "expressionNames": {
+                  "#postId": "postId",
+                  "#userId": "userId"
+                }
+            }
+        }
+      ResponseMappingTemplate: |
+        #if($context.error)
+          $util.error($context.error.message, $context.error.type)
+        #end
+        
+        $util.toJson($context.result)
+  
+  # Usecase 2 - AppSync Pipeline Resolver - Query - getFriendsPosts
+  GetFriendsPostsPipelineResolver:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      ApiId: !GetAtt GraphQLApi.ApiId
+      FieldName: getFriendsPosts
+      TypeName: Query
+      Kind: PIPELINE
+      PipelineConfig:
+        Functions:
+          - !GetAtt GetListOfFriendsFunction.FunctionId
+          - !GetAtt GetFriendsPostsFunction.FunctionId
+      # following represents BEFORE segment in pipeline resolver
+      RequestMappingTemplate: |
+        $util.qr($context.stash.put("userId", $context.identity.username))
+        {}
+      # following represents AFTER segment in pipeline resolver
+      ResponseMappingTemplate: |
+        $util.toJson($context.prev.result)
+    DependsOn: GraphQLSchema
+
+  # AppSync Pipeline Resolver Function - get_list_of_friends
+  # Description: Function to get list of friends for current userId
+  GetListOfFriendsFunction:
+    Type: AWS::AppSync::FunctionConfiguration
+    Properties:
+      ApiId: !GetAtt GraphQLApi.ApiId
+      Name: get_list_of_friends
+      DataSourceName: !GetAtt UsersDynamoDBTableDataSource.Name
+      FunctionVersion: "2018-05-29"
+      RequestMappingTemplate: |
+        {
+          "operation": "GetItem",
+          "key": {
+            "userId": $util.dynamodb.toDynamoDBJson($context.stash.userId)
+          }
+        }
+      ResponseMappingTemplate: |
+        $util.toJson($context.result.friends)
+
+  # AppSync Pipeline Resolver Function - get_friends_posts
+  # Description: Function performs "scan" operation on userId column in posts table
+  GetFriendsPostsFunction:
+    Type: AWS::AppSync::FunctionConfiguration
+    Properties:
+      ApiId: !GetAtt GraphQLApi.ApiId
+      Name: get_friends_posts
+      DataSourceName: !GetAtt PostsDynamoDBTableDataSource.Name
+      FunctionVersion: "2018-05-29"
+      RequestMappingTemplate: |
+        #set($expressionArr = [])
+        #set($expressionValueMap = {})
+
+        #foreach($friend in ${context.prev.result})
+          ## build a template or placeholder
+          #set($expressionTemplate = ":t" + $foreach.count)
+          ## now build expression array
+          #set($partialExpressionStr = "userId = ${expressionTemplate}")
+          $util.qr($expressionArr.add($partialExpressionStr))
+          ## also build expression value map
+          $util.qr($expressionValueMap.put($expressionTemplate, $util.dynamodb.toString($friend)))
+        #end
+        ## lets now build the final expression with OR conditions
+        #set($expressionStr = "")
+        #foreach($expr in ${expressionArr})
+          #if($foreach.count == $expressionArr.size())
+            #set($expressionStr = "${expressionStr}${expr}")
+          #else
+            #set($expressionStr = "${expressionStr}${expr} OR ")
+          #end
+        #end
+        {
+          "operation": "Scan",
+          "index": "userId-index",
+          "filter": {
+            #if(!$expressionArr.isEmpty())
+              "expression": $util.toJson($expressionStr),
+              "expressionValues" : $util.toJson($expressionValueMap)
+            #else
+              #set($expressionStr = "attribute_not_exists(postId)")
+              "expression": $util.toJson($expressionStr),
+            #end
+          },
+          "limit": $util.defaultIfNull($context.arguments.limit, 86400),
+          "nextToken": $util.toJson($util.defaultIfNullOrEmpty($context.arguments.nextToken, null)),
+        }
+      ResponseMappingTemplate: |
+        $util.toJson($context.result)
+
+  # Usecase 3 - AppSync Resolver - Mutation - createPostContent
+  # CreatePostContentResolver:
+  #   Type: AWS::AppSync::Resolver
+  #   Properties:
+  #     ApiId: !GetAtt GraphQLApi.ApiId
+  #     DataSourceName: !GetAtt LambdaDataSource.Name
+  #     FieldName: createPostContent
+  #     TypeName: Mutation
+  #   DependsOn: GraphQLSchema
+
+  # Usecase 3 - AppSync Pipeline Resolver - Query - getPostContent
+  # GetPostContentResolver:
+  #   Type: AWS::AppSync::Resolver
+  #   Properties:
+  #     ApiId: !GetAtt GraphQLApi.ApiId
+  #     DataSourceName: !GetAtt LambdaDataSource.Name
+  #     FieldName: getPostContent
+  #     TypeName: Query
+  #   DependsOn: GraphQLSchema
+
+  # Usecase 3 - AppSync Pipeline Resolver - Mutation - createPostContent
+  CreatePostContentPipelineResolver:
+    Type: "AWS::AppSync::Resolver"
+    Properties:
+      ApiId: !GetAtt GraphQLApi.ApiId
+      TypeName: Mutation
+      FieldName: createPostContent 
+      Kind: PIPELINE
+      PipelineConfig: 
+        Functions:
+          - !GetAtt GetPostContentS3KeyFunction.FunctionId
+          - !GetAtt CreatePostContentInS3Function.FunctionId
+      RequestMappingTemplate: "{}"
+      ResponseMappingTemplate: "$util.toJson($context.result)"
+    DependsOn: GraphQLSchema
+
+  # AppSync Pipeline Resolver Function - create_post_content_in_s3
+  CreatePostContentInS3Function:
+    Type: AWS::AppSync::FunctionConfiguration 
+    Properties:
+      ApiId: !GetAtt GraphQLApi.ApiId
+      Name: create_post_content_in_s3
+      DataSourceName: !GetAtt LambdaDataSource.Name
+      FunctionVersion: "2018-05-29"
+
+  # Usecase 3 - AppSync Pipeline Resolver - Query - getPostContent
+  GetPostContentPipelineResolver:
+    Type: "AWS::AppSync::Resolver"
+    Properties:
+      ApiId: !GetAtt GraphQLApi.ApiId
+      TypeName: Query
+      FieldName: getPostContent 
+      Kind: PIPELINE
+      PipelineConfig: 
+        Functions:
+          - !GetAtt GetPostContentS3KeyFunction.FunctionId
+          - !GetAtt GetPostContentFromS3Function.FunctionId
+      RequestMappingTemplate: "{}"
+      ResponseMappingTemplate: "$util.toJson($context.result)"
+    DependsOn: GraphQLSchema
+  # AppSync Pipeline Resolver Function - get_post_content_s3_key
+  GetPostContentS3KeyFunction:
+    Type: AWS::AppSync::FunctionConfiguration 
+    Properties:
+      ApiId: !GetAtt GraphQLApi.ApiId
+      Name: get_post_content_s3_key
+      DataSourceName: !GetAtt PostsDynamoDBTableDataSource.Name
+      FunctionVersion: "2018-05-29"
+      RequestMappingTemplate: |
+        {
+            "version" : "2017-02-28",
+            "operation" : "Query",
+            "query" : {
+              "expression": "postId = :postId",
+              "expressionValues" : {
+                ":postId" : $util.dynamodb.toDynamoDBJson($context.arguments.input.postId)
+              }
+            },
+            "filter": {
+                "expression": "userId = :userId",
+                "expressionValues" : {
+                  ":userId" : $util.dynamodb.toDynamoDBJson($context.identity.username)
+                }
+            },
+            "scanIndexForward": true,
+            "limit": $util.defaultIfNull(${context.arguments.limit}, 1000),
+            "nextToken": $util.toJson($util.defaultIfNullOrBlank($context.arguments.nextToken, null))
+        }
+      ResponseMappingTemplate: |
+        #set ($count = $context.result.items.size())
+        #if ($count <= 0)
+          $util.error("Unknown postId: ${context.arguments.input.postId}, or userId: ${context.identity.username}")
+        #end
+
+        #if($context.error)
+            $util.error($context.error.message, $context.error.type)
+        #end
+        ## Pass back the result from DynamoDB. **
+        $util.toJson($context.result)  
+  # AppSync Pipeline Resolver Function - get_post_content_from_s3
+  GetPostContentFromS3Function:
+    Type: AWS::AppSync::FunctionConfiguration 
+    Properties:
+      ApiId: !GetAtt GraphQLApi.ApiId
+      Name: get_post_content_from_s3
+      DataSourceName: !GetAtt LambdaDataSource.Name
+      FunctionVersion: "2018-05-29"
+Outputs:
+  S3BucketBlogPostContent:
+    Value: !Ref S3BucketBlogPostContent
+    Description: S3 Bucket Name for Blog Post Content

@@ -1,0 +1,123 @@
+{
+    "Comment": "Crear Solicitud",
+    "StartAt": "Data",
+    "States": {
+        "Data":{
+            "Type": "Pass",
+            "Parameters": {
+                "usr": "Usuario X",
+                "cId": "SW-99"
+            },
+            "Next": "ParallelState"
+        },
+        "ParallelState": {
+            "Type": "Parallel",
+            "Parameters": {
+                "user.$": "$.usr",
+                "caseId.$": "$.cId",
+                "numero1": 1
+            },
+            "Branches": [
+                {
+                    "StartAt": "ParallelNada1",
+                    "States": {
+                        "ParallelNada1":{
+                            "Type": "Task",
+                            "Resource": "${NadaFunctionArn}",
+                            "ResultSelector": {
+                                "nadaNada.$": "$"
+                            },
+                            "ResultPath": "$.path",
+                            "End":true
+                        }
+                    }
+                },
+                {
+                    "StartAt": "Get Role",
+                    "States": {
+                        "Get Role": {
+                            "Type": "Task",
+                            "Resource": "${DDBGetItem}",
+                            "Parameters": {
+                                "TableName": "${TableName}",
+                                "Key": {
+                                    "id": {
+                                        "S": "VARIABLES"
+                                    },
+                                    "sort": {
+                                        "S": "VARIABLES"
+                                    }
+                                },
+                                "ProjectionExpression": "cadena,#int",
+                                "ExpressionAttributeNames": {
+                                    "#int": "int"
+                                }
+                            },
+                            "ResultPath":"$.Item",
+                            "Next": "Build"
+                        },
+                        "Build": {
+                            "Type": "Pass",
+                            "Parameters":{
+                                "cadena.$": "$.Item.Item.cadena",
+                                "user.$": "$.user",
+                                "caseId.$": "$.caseId",
+                                "numero1.$": "$.numero1",
+                                "int.$":"$.Item.Item.int",
+                                "entero.$":"$.Item.Item.int.N"
+                            },
+                            "End": true
+                        }
+                    }
+                }
+            ],
+            "OutputPath": "$[1]",
+            "Next": "Prueba State"
+        },
+        "Prueba State":{
+            "Type": "Pass",
+            "Parameters": {
+                "value": "NUEVA PRUEBA 2"
+            },
+            "ResultPath": "$.nuevaPrueba",
+            "Next": "Pass State"
+        },
+        "Pass State" :{
+            "Type": "Pass",
+            "Parameters": {
+                "user.$": "$.user",
+                "caseId.$": "$.caseId",
+                "nada.$": "$.cadena",
+                "numero1.$": "$.numero1",
+                "aaa":2,
+                "int.$":"$.int",
+                "entero.$":"States.StringToJson($.entero)",
+                "prueba.pruebaDentro.$":"$.cadena",
+                "prueba2":{
+                    "pruebaDentro2.$": "$.cadena"
+                }
+            },
+            "Next": "Aprobar"
+        },
+        "Aprobar":{
+            "Type": "Task",
+            "Resource": "arn:aws:states:::states:startExecution",
+            "Parameters": {
+                "Input":{
+                    "user.$": "$.user",
+                    "request": {
+                        "numero1.$": "$.numero1",
+                        "int.$":"$.int",
+                        "entero.$":"$.entero",
+                        "caseId.$":"$.caseId",
+                        "comment": null
+                    }
+                },
+                "StateMachineArn": "${ApproveR}",
+                "Name":"AprobarSolicitudPrivada"
+            },
+            "ResultPath":"$",
+            "End": true
+        }
+    }
+}

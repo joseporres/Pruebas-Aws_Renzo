@@ -1,0 +1,216 @@
+type ProcessOfficio{
+    caseId: String!             # No se cambia
+    creationDate: String!       # No se cambia
+    emisionDate: String!
+    receptionDate: String!      # No se cambia
+    processType: String!        # No se cambia
+    creator: String!            # No se cambia
+    creatorName: String!        # No se cambia
+    docName: String!
+    requestingEntity: String!
+    subject: String
+    state: Int!
+    targetUsers: [String]       # No se cambia
+    legal: [Legal]             # No se cambia / Posiblemente se remueva
+    responsables: [Responsable]
+    attached: [String]
+}
+
+input ProcessOfficioInput{
+    caseId: String!
+    creationDate: String!
+    emisionDate: String!
+    receptionDate: String!
+    processType: String!
+    creator: String!
+    creatorName: String!
+    docName: String!
+    requestingEntity: String!
+    subject: String
+    state: Int
+    targetUsers: [String]
+    legal: [LegalInput]
+    responsables: [ResponsableInput]
+    attached: [String]
+}
+
+type Legal{
+    userId: String!
+    userName: String!
+    email: String!
+}
+
+input LegalInput{
+    userId: String!
+    userName: String!
+    email: String!
+}
+
+type Responsable{
+    caseId: String!    
+    userId: String!
+    name: String!
+    email: String!
+    legalUser: String!
+    evidence: Evidence
+}
+
+input ResponsableInput{
+    caseId: String!    
+    userId: String!
+    name: String!
+    email: String!
+    legalUser: String!
+    evidence: EvidenceInput
+}
+
+type Evidence{
+    evidenceId: String!
+    caseId: String!
+    responsable: String!
+    attached: [String]!
+    observation: String
+}
+
+input EvidenceInput{
+    evidenceId: String!
+    caseId: String!
+    responsable: String!
+    attached: [String]!
+    observation: String
+}
+
+type Question{
+    idQuestion: String!
+    question: String!
+    answer: Boolean!
+    order: Int!
+}
+
+input QuestionInput{
+    idQuestion: String
+    question: String!
+    answer: Boolean!
+}
+
+type Answer{
+    question: String!
+    answer: Boolean!
+}
+
+input AnswerInput{
+    idQuestion: String!
+    answer: Boolean!
+}
+
+input OrderInput{
+    idQuestion: String!
+    order: Int!
+}
+
+type QuestionsOutPut{
+  items:[Question]
+}
+
+type Execution {
+	output: String
+}
+
+type Affidavit{
+    idQuestion: String!
+    quizAnswer: [Answer]
+    quizTime: String!
+    state: Int! 
+}
+
+type Test{
+    id: String!
+    name: String!
+    testOption: [Option2]
+    list: [String]
+}
+
+input TestInput{
+    id: String!
+    name: String!
+    testOption: [OptionTest]!
+    list: [String]
+}
+
+type Option2{
+    id: String!
+    opt: String!
+}
+
+input OptionTest{
+    id: String!
+    opt: String!
+}
+
+input Data{
+    id: String!
+    name: String!
+    cadena: String
+    entero: Int
+    booleano: Boolean
+}
+
+type UPR{
+    data1: String
+    data2: String
+    data3: String
+}
+
+type Settings{
+    name: String!
+    processes:[Option]!
+    days: Int!
+    boss: String
+    bossName: String
+    role: String
+    officeRole: String
+}
+
+type Option {
+    title: String!
+    url: String!
+    icon: String
+    active: Boolean!
+}
+
+type SettingsOutput {
+    items: [Settings]
+    nextToken: String
+}
+
+type Query{
+    getProcessOfficio(caseId: String!): ProcessOfficio
+    getResponsablesOfficio(caseId: String!): [Responsable]
+    getQuestions: QuestionsOutPut
+    getAffidavit: Affidavit
+    getAllUsers(nextToken: String, process: String): SettingsOutput  
+}
+
+type Mutation{
+    processOfficio(officio: ProcessOfficioInput!):ProcessOfficio
+    addResponsables(caseId: String!, responsables:[ResponsableInput!]!):ProcessOfficio
+    deleteResponsables(caseId:String!, responsableId:String!):ProcessOfficio
+    addEvidences(caseId:String!,responsableId:String,evidence:EvidenceInput!):ProcessOfficio
+    storeQuestion(question:QuestionInput!): Question
+    deleteQuestion(questionId:String!): Execution
+    updateResolverTest(data1: String, data2: String, data3: String): UPR
+    updateQuestion(question:QuestionInput!): Question
+    orderQuestions(questions:[OrderInput!]!): Execution
+    checkAnswers(answers:[AnswerInput!]!):String
+    checkAnswers2(answers:[AnswerInput!]!):String
+    createRequest:Execution
+    approveRequest:Execution
+    putTest(test: TestInput):Execution
+    updateTest(test: TestInput):Execution
+    updateFunctionTest(data:Data):Execution
+}
+
+schema {
+  query: Query
+  mutation: Mutation
+}

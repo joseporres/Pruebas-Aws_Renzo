@@ -1,0 +1,16 @@
+{
+    "Comment": "Update y Put Test",
+    "StartAt": "Update Function",
+    "States": {
+        "Update Function": {
+            "Type": "Task",
+            "Resource": "${UpdateFunctionArn}",
+            "Parameters": {
+                "data.$": "$.data",
+                "vacio":""
+            }, 
+            "ResultPath":"$",
+            "End": true
+        }
+    }
+}

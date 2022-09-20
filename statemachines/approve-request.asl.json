@@ -1,0 +1,15 @@
+{
+    "Comment": "Aprobar Solicitud",
+    "StartAt": "Update Last Session",
+    "States": {
+        "Update Last Session": {
+            "Type": "Task",
+            "Resource": "${UpdateToJsonArn}",
+            "Parameters": {
+                "userId": "User1"
+            }, 
+            "ResultPath":"$",
+            "End": true
+        }
+    }
+}
