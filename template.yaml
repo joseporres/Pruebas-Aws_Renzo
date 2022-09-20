@@ -1,0 +1,1446 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: 'AWS::Serverless-2016-10-31'
+Description: >
+  Prueba de oficios en OFVI
+  
+Resources:
+ ###################
+ ## AppSync Role  ##
+ ###################
+  AppSyncServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - appsync.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - PolicyName: AllowAccessForAppsyncResolvers
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - states:StartSyncExecution
+                Resource:
+                  - !Ref OrderQuestionsStateMachine
+                  - !Ref CheckAnswers2StateMachine
+                  - !Ref DeleteQuestionStateMachine
+                  - !Ref CreateRequestStateMachine
+                  - !Ref ApproveRequestStateMachine
+                  - !Ref PutTestStateMachine
+                  - !Ref UpdateTestStateMachine
+                  - !Ref UpdateFunctionTestStateMachine
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                Resource: 
+                  - !GetAtt BDOfficios.Arn
+                  - !Sub 
+                    - "${Table}/index/*"
+                    - { Table: !GetAtt BDOfficios.Arn }
+              - Effect: Allow
+                Action:
+                - lambda:invokeFunction
+                Resource: 
+                  - !GetAtt AnswerCheckFunction.Arn
+                  - !GetAtt GetAllUsersFunction.Arn
+
+  UserPool:
+    Type: "AWS::Cognito::UserPool"
+    Description: "A Cognito user pool for authenticating users"
+    Properties:
+      UserPoolName: user-pool
+      UsernameAttributes: [email]
+      # AutoVerifiedAttributes:
+      #   - phone_number
+      MfaConfiguration: "OFF"
+      Schema:
+        - Name: email
+          AttributeDataType: String
+          Mutable: true
+          Required: false
+        - Name: name
+          AttributeDataType: String
+          Mutable: true
+          Required: false
+        - Name: given_name
+          AttributeDataType: String
+          Mutable: true
+          Required: false
+        - Name: family_name
+          AttributeDataType: String
+          Mutable: true
+          Required: false
+  UserPoolClientTest:
+    Type: "AWS::Cognito::UserPoolClient"
+    Description: "App Client used by AWS AppSync"
+    Properties:
+      ClientName: appsync-client
+      GenerateSecret: false
+      UserPoolId: !Ref UserPool
+  
+ # Cognito
+  SNSRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - cognito-idp.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - PolicyName: DDBAccess
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: 
+                  - sns:publish
+                Resource: "*"
+
+#  # Cognito UserPool Identity Provider
+#   UserPoolIdentityProvider:
+#     Type: AWS::Cognito::UserPoolIdentityProvider
+#     Properties:
+#       UserPoolId: !Ref UserPoolTest
+#       ProviderName: "Google"
+#       ProviderDetails:
+#         client_id: "465677874128-isd62l4a7otemss24fqmr5606ljv3rh3.apps.googleusercontent.com"
+#         client_secret: "IScpResLz2tGUUCOqOG5Koqt"
+#         authorize_scopes: "profile email openid"
+#       ProviderType: "Google"
+#       AttributeMapping:
+#         email: "email"
+#         name: "name"
+#         given_name: "given_name"
+#         family_name: "family_name"
+        
+  AppSyncApi:
+    DependsOn: AppSyncServiceRole
+    Type: AWS::AppSync::GraphQLApi
+    Description: "The GraphQL API for the single table App"
+    Properties:
+      Name: ofviOffi
+      AuthenticationType: API_KEY
+
+ # API Key for external access
+  AppSyncApiKey:
+    Type: AWS::AppSync::ApiKey
+    Properties: 
+      ApiId: !GetAtt AppSyncApi.ApiId
+
+ # AppSync Schema
+  AppSyncSchema:
+    Type: AWS::AppSync::GraphQLSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApi.ApiId
+      DefinitionS3Location: "./schema.graphql"
+
+ # AppSync Data Source for DynamoDB
+  AppSyncTableDataSource:
+    Type: AWS::AppSync::DataSource
+    Properties:
+      Name: SingleTableOfficios
+      ApiId: !GetAtt AppSyncApi.ApiId
+      Description: "The Single Table AppSync Data Source"
+      Type: AMAZON_DYNAMODB
+      ServiceRoleArn: !GetAtt AppSyncServiceRole.Arn
+      DynamoDBConfig:
+        TableName: !Ref BDOfficios
+        AwsRegion: !Sub ${AWS::Region}
+
+ # AppSync Data Source for StepFunction
+  StepFunctionsHttpDataSource:
+    Type: AWS::AppSync::DataSource
+    Properties:
+      ApiId: !GetAtt AppSyncApi.ApiId
+      Name: StepFunctionsHttpDataSource
+      Description: Step Functions HTTP
+      Type: HTTP
+      ServiceRoleArn: !GetAtt AppSyncServiceRole.Arn
+      HttpConfig:
+        Endpoint: !Sub https://sync-states.${AWS::Region}.amazonaws.com/
+        AuthorizationConfig:
+          AuthorizationType: AWS_IAM
+          AwsIamConfig:
+            SigningRegion: !Ref AWS::Region
+            SigningServiceName: states
+
+ # checkAnswers Data Source
+  CheckAnswersDataSource:
+    Type: "AWS::AppSync::DataSource"
+    Properties:
+      ApiId: !GetAtt AppSyncApi.ApiId
+      Name: CheckAnswersDataSource
+      Type: AWS_LAMBDA
+      ServiceRoleArn: !GetAtt AppSyncServiceRole.Arn
+      LambdaConfig:
+        LambdaFunctionArn: !GetAtt AnswerCheckFunction.Arn
+ # LambdaDataSource Data Source
+  LambdaDataSource:
+    Type: "AWS::AppSync::DataSource"
+    Properties:
+      ApiId: !GetAtt AppSyncApi.ApiId
+      Name: LambdaDataSource
+      Type: AWS_LAMBDA
+      ServiceRoleArn: !GetAtt AppSyncServiceRole.Arn
+      LambdaConfig:
+        LambdaFunctionArn: !GetAtt GetAllUsersFunction.Arn
+
+ # Resolver: Query - getProcessOfficio
+  GetProcessOfficioResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApi.ApiId
+      TypeName: Query
+      FieldName: getProcessOfficio
+      DataSourceName: !GetAtt AppSyncTableDataSource.Name
+      RequestMappingTemplate: >
+        {
+          "version": "2017-02-28",
+          "operation": "GetItem",
+          "key": {
+            "id": $util.dynamodb.toDynamoDBJson("PROCESS_OFFICIO"),
+            "sort": $util.dynamodb.toDynamoDBJson($context.args.caseId)
+          }
+        }
+      ResponseMappingTemplate: >
+        {
+            "caseId": $util.toJson($ctx.result['caseId']),                            
+            "creationDate": $util.toJson($ctx.result['creationDate']),                           
+            "emisionDate": $util.toJson($ctx.result['emisionDate']),                           
+            "receptionDate": $util.toJson($ctx.result['receptionDate']),                           
+            "processType": $util.toJson($ctx.result['processType']),                           
+            "creator": $util.toJson($ctx.result['creator']),                           
+            "creatorName": $util.toJson($ctx.result['creatorName']),                           
+            "docName": $util.toJson($ctx.result['docName']),                           
+            "requestingEntity": $util.toJson($ctx.result['requestingEntity']),
+            "subject": $util.toJson($ctx.result['subject']),                 
+            "state": $util.toJson($ctx.result['state']),
+            "legal": $util.toJson($ctx.result['legal']),
+            "targetUsers": $util.toJson($ctx.result['targetUsers']),
+            "responsables": $util.toJson($ctx.result['responsables']),
+            "attached": $util.toJson($ctx.result['attached'])
+        }
+
+ # Resolver: Query - getResponsables
+  getResponsablesOfficioResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApi.ApiId
+      TypeName: Query
+      FieldName: getResponsablesOfficio
+      DataSourceName: !GetAtt AppSyncTableDataSource.Name
+      RequestMappingTemplate: >
+        {
+          "version": "2017-02-28",
+          "operation": "GetItem",
+          "key": {
+            "id": $util.dynamodb.toDynamoDBJson("PROCESS_OFFICIO"),
+            "sort": $util.dynamodb.toDynamoDBJson($context.args.caseId)
+          }
+        }
+      ResponseMappingTemplate: $util.toJson($ctx.result.responsables)
+
+ # Resolver: Mutation - processOfficio
+  processOfficioResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApi.ApiId
+      TypeName: Mutation
+      FieldName: processOfficio
+      DataSourceName: !GetAtt AppSyncTableDataSource.Name
+      RequestMappingTemplate: >
+        {
+          "version": "2017-02-28",
+          "operation": "PutItem",
+          "key": {
+                "id" : $util.dynamodb.toDynamoDBJson("PROCESS_OFFICIO"),
+                "sort" : $util.dynamodb.toDynamoDBJson($ctx.args.officio.caseId)
+          },
+          "attributeValues" : $util.dynamodb.toMapValuesJson($ctx.args.officio)
+        }
+      ResponseMappingTemplate: "$util.toJson($ctx.result)"
+
+ # Resolver: Mutation - addResponsables
+  addResponsablesResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApi.ApiId
+      TypeName: Mutation
+      FieldName: addResponsables
+      DataSourceName: !GetAtt AppSyncTableDataSource.Name
+      RequestMappingTemplate: >
+        {
+          "version": "2017-02-28",
+          "operation": "UpdateItem",
+          "key": {
+                "id" : $util.dynamodb.toDynamoDBJson("PROCESS_OFFICIO"),
+                "sort" : $util.dynamodb.toDynamoDBJson($ctx.args.caseId)
+          },
+          "update":{
+            "expression": "set #responsables = list_append(responsables,:newResponsables)",
+            "expressionNames": {
+              "#responsables": "responsables"
+            },
+            "expressionValues": {
+              ":newResponsables": $utils.dynamodb.toDynamoDBJson($ctx.args.responsables)
+            }
+          }
+        }
+      ResponseMappingTemplate: "$util.toJson($ctx.result)"
+
+  # Resolver: Pipeline Mutation - deleteResponsablesResolver
+  deleteResponsablesPipelineResolver:
+    Type: "AWS::AppSync::Resolver"  
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApi.ApiId
+      TypeName: Mutation
+      FieldName: deleteResponsables 
+      Kind: PIPELINE
+      PipelineConfig: 
+        Functions:
+          - !GetAtt getResponsablesFunction.FunctionId
+          - !GetAtt deleteResponsablesFunction.FunctionId
+      RequestMappingTemplate: >
+        $util.qr($context.stash.put("caseId", $ctx.args.caseId))
+        $util.qr($context.stash.put("responsableId", $ctx.args.responsableId))
+        {}
+      ResponseMappingTemplate: "$util.toJson($context.result)"
+
+ # Function: getResponsablesFunction
+  getResponsablesFunction:
+    Type: AWS::AppSync::FunctionConfiguration
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApi.ApiId
+      Name: getResponsablesFunction
+      DataSourceName: !GetAtt AppSyncTableDataSource.Name
+      FunctionVersion: "2018-05-29"
+      RequestMappingTemplate: >
+        {
+          "version": "2017-02-28",
+          "operation": "GetItem",
+          "key": {
+            "id": $util.dynamodb.toDynamoDBJson("PROCESS_OFFICIO"),
+            "sort": $util.dynamodb.toDynamoDBJson($context.stash.caseId)
+          }
+        }
+      ResponseMappingTemplate: $util.toJson($ctx.result.responsables)
+
+ # Function: deleteResponsablesFunction
+  deleteResponsablesFunction:
+    Type: AWS::AppSync::FunctionConfiguration
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApi.ApiId
+      Name: deleteResponsablesFunction
+      DataSourceName: !GetAtt AppSyncTableDataSource.Name
+      FunctionVersion: "2018-05-29"
+      RequestMappingTemplate: >
+        #set ($responsablelist=[])
+        #foreach($item in $ctx.prev.result)
+          #if($item['userId'] != $context.stash.responsableId)
+            $util.qr($responsablelist.add($item))
+          #end
+        #end
+        {
+          "version": "2017-02-28",
+          "operation": "UpdateItem",
+          "key": {
+            "id": $util.dynamodb.toDynamoDBJson("PROCESS_OFFICIO"),
+            "sort": $util.dynamodb.toDynamoDBJson($context.stash.caseId)
+          },
+          "update":{
+            "expression": "set #responsables = :newResponsables",
+            "expressionNames": {
+              "#responsables": "responsables"
+            },
+            "expressionValues": {
+              ":newResponsables": $utils.dynamodb.toDynamoDBJson($responsablelist)
+            }
+          }
+        }
+      ResponseMappingTemplate: $util.toJson($ctx.result)
+
+  # Resolver: Pipeline Mutation - addEvidencesResolver
+  addEvidencesResolver:
+    Type: "AWS::AppSync::Resolver"  
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApi.ApiId
+      TypeName: Mutation
+      FieldName: addEvidences 
+      Kind: PIPELINE
+      PipelineConfig: 
+        Functions:
+          - !GetAtt getResponsablesFunction.FunctionId
+          - !GetAtt addEvidencesFunction.FunctionId
+      RequestMappingTemplate: >
+        $util.qr($context.stash.put("caseId", $ctx.args.caseId))
+        $util.qr($context.stash.put("responsableId", $ctx.args.responsableId))
+        $util.qr($context.stash.put("evidence", $ctx.args.evidence))
+        {}
+      ResponseMappingTemplate: "$util.toJson($context.result)"
+
+ # Function: addEvidencesFunction
+  addEvidencesFunction:
+    Type: AWS::AppSync::FunctionConfiguration
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApi.ApiId
+      Name: addEvidencesFunction
+      DataSourceName: !GetAtt AppSyncTableDataSource.Name
+      FunctionVersion: "2018-05-29"
+      RequestMappingTemplate: >
+        #foreach($item in $ctx.prev.result)
+          #if($item['userId'] == $context.stash.responsableId)
+            #set ($i = $foreach.count - 1)
+          #end
+        #end
+        {
+          "version": "2017-02-28",
+          "operation": "UpdateItem",
+          "key": {
+            "id": $util.dynamodb.toDynamoDBJson("PROCESS_OFFICIO"),
+            "sort": $util.dynamodb.toDynamoDBJson($context.stash.caseId)
+          },
+          "update":{
+            "expression": "set #responsables[$i].#evidence = :newEvidence",
+            "expressionNames": {
+              "#responsables": "responsables",
+              "#evidence": "evidence"
+            },
+            "expressionValues": {
+              ":newEvidence": $utils.dynamodb.toDynamoDBJson($context.stash.evidence)
+            }
+          }
+        }
+      ResponseMappingTemplate: $util.toJson($ctx.result)
+
+ # Resolver: Query - getQuestions
+  getQuestionsResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApi.ApiId
+      TypeName: Query
+      FieldName: getQuestions
+      DataSourceName: !GetAtt AppSyncTableDataSource.Name
+      RequestMappingTemplate: >
+        {
+          "version": "2017-02-28",
+          "operation": "Query",
+          "query": {
+            "expression": "id = :id", 
+            "expressionValues":	{              
+        	    ":id" : $util.dynamodb.toDynamoDBJson("QUESTION")
+            }
+          }
+        }
+      ResponseMappingTemplate: >
+        {
+          "items": [
+                      #foreach($item in $ctx.result.items)
+                        {
+                            "idQuestion":$util.toJson($item['sort']),
+                            "question": $util.toJson($item['question']),
+                            "answer": $util.toJson($item['answer']),
+                            "order": $util.toJson($item['order'])
+                        }#if($foreach.hasNext),#end
+                        #end
+                    ]
+        }
+
+  # # Resolver: Query - GetAllUsersResolver     
+  # GetAllUsersResolver:
+  #   Type: AWS::AppSync::Resolver
+  #   DependsOn: AppSyncSchema
+  #   Properties:
+  #     ApiId: !GetAtt AppSyncApi.ApiId
+  #     DataSourceName: !GetAtt LambdaDataSource.Name
+  #     FieldName: getAllUsers
+  #     TypeName: Query
+  #     RequestMappingTemplate: >
+  #       {
+  #         "version": "2017-02-28",
+  #         "operation": "Invoke",
+  #         "payload": {
+  #           "process":  $utils.toJson($context.arguments.process)
+  #         }
+  #       }
+  #     ResponseMappingTemplate: $utils.toJson($context.result)
+
+
+# Resolver: Query - getAllUsers
+  GetAllUsersResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApi.ApiId
+      TypeName: Query
+      FieldName: getAllUsers
+      DataSourceName: !GetAtt AppSyncTableDataSource.Name
+      RequestMappingTemplate: >      
+        #if($ctx.args.process=="SW") 
+          $util.qr($ctx.stash.put("process","Smart Working"))  
+        #elseif($ctx.args.process=="OF")
+          $util.qr($ctx.stash.put("process","Oficios")) 
+        #else
+          $util.qr($ctx.stash.put("process", "")) 
+        #end        
+        {
+          "version" : "2017-02-28",
+          "operation" : "Query",    
+          "index" : "list-users",      
+          "query" : {
+            "expression": "sort = :sort",            
+            "expressionValues" : {
+                ":sort" : $util.dynamodb.toDynamoDBJson("SETTINGS")
+            }
+          },
+          #if( $context.args.nextToken ) "nextToken": "$context.args.nextToken", #end
+          "limit" : 500
+        }
+      ResponseMappingTemplate: >
+        {
+          "items": [
+                        #foreach($item in $ctx.result.items)
+                            #set($return=0)    
+                            #if($ctx.stash.process=="")
+                                #set($return=1) 
+                            #else
+                                #foreach($process in $item['processes'])
+                                    #if ($process['title']==$ctx.stash.process && $process['active'])
+                                        #set($return=1)
+                                        #break
+                                    #end 
+                                #end
+                            #end
+                            #if($return==1)
+                                {
+                                    "processes": $util.toJson($item['processes']),
+                                    "name": $util.toJson($item['name']),                        
+                                    "days": $util.toJson($item['days']),
+                                    "role": $util.toJson($item['role']),
+                                    "officeRole": $util.toJson($item['officeRole']),
+                                    "boss": $util.toJson($item['boss']),                           
+                                    "bossName": $util.toJson($item['bossName'])
+                                }#if($foreach.hasNext),#end
+                            #end
+                        #end
+                     ],
+          "nextToken": $util.toJson($ctx.result.nextToken)
+        }
+
+
+
+  CheckAnswersResolver:
+    Type: "AWS::AppSync::Resolver"  
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApi.ApiId
+      TypeName: Mutation
+      FieldName: checkAnswers 
+      Kind: PIPELINE
+      PipelineConfig: 
+        Functions:
+          - !GetAtt GetQuestionsFunction.FunctionId
+          - !GetAtt CheckAnswersFunction.FunctionId
+      RequestMappingTemplate: >
+        {}
+      ResponseMappingTemplate: "$util.toJson($context.result)"
+
+ # Function: GetQuestionsFunction
+  GetQuestionsFunction:
+    Type: AWS::AppSync::FunctionConfiguration
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApi.ApiId
+      Name: getQuestionsFunction
+      DataSourceName: !GetAtt AppSyncTableDataSource.Name
+      FunctionVersion: "2018-05-29"
+      RequestMappingTemplate: >
+        {
+          "version": "2017-02-28",
+          "operation": "Query",
+          "query": {
+            "expression": "id = :id", 
+            "expressionValues":	{              
+        	    ":id" : $util.dynamodb.toDynamoDBJson("QUESTION")
+            }
+          }
+        }
+      ResponseMappingTemplate: >
+        #set ($event = {})
+        $util.qr($event.put("qns", $context.result.items))
+        $util.qr($event.put("ans", $context.arguments.answers))
+        $util.toJson($event)
+
+ # Function: checkAnswersFunction
+  CheckAnswersFunction:
+    Type: AWS::AppSync::FunctionConfiguration
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApi.ApiId
+      Name: checkAnswersFunction
+      DataSourceName: !GetAtt CheckAnswersDataSource.Name
+      FunctionVersion: "2018-05-29"
+
+ # Resolver: Pipeline Mutation - storeQuestion
+  StoreQuestionResolver:
+    Type: "AWS::AppSync::Resolver"  
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApi.ApiId
+      TypeName: Mutation
+      FieldName: storeQuestion 
+      Kind: PIPELINE
+      PipelineConfig: 
+        Functions:
+          - !GetAtt CheckNumberQuestionsFunction.FunctionId
+          - !GetAtt StoreQuestionFunction.FunctionId
+      RequestMappingTemplate: >
+        {}
+      ResponseMappingTemplate: "$util.toJson($context.result)"
+
+ # Function: CheckNumberQuestions
+  CheckNumberQuestionsFunction:
+    Type: AWS::AppSync::FunctionConfiguration 
+    Properties:
+      ApiId: !GetAtt AppSyncApi.ApiId
+      Name: checkNumberQuestions
+      DataSourceName: !GetAtt AppSyncTableDataSource.Name
+      FunctionVersion: "2018-05-29"
+      RequestMappingTemplate: >
+        {
+            "version" : "2017-02-28",
+            "operation": "Scan",
+            "filter": {
+                "expression": "id = :id",
+                "expressionValues": {
+                    ":id": $util.dynamodb.toDynamoDBJson("QUESTION")
+                }
+            }
+        }
+      ResponseMappingTemplate: "$util.toJson($context.result.items)" 
+
+ # Function: StoreQuestionFunction
+  StoreQuestionFunction:
+    Type: AWS::AppSync::FunctionConfiguration
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApi.ApiId
+      Name: storeQuestionFunction
+      DataSourceName: !GetAtt AppSyncTableDataSource.Name
+      FunctionVersion: "2018-05-29"
+      RequestMappingTemplate: >
+        #set($count = $context.prev.result.size())
+        #if($util.isNullOrEmpty($ctx.args.question.idQuestion)) 
+          #set($id=$util.autoId())
+        #else 
+          #set($id=$ctx.args.question.idQuestion)
+        #end
+        {
+            "version" : "2017-02-28",
+            "operation" : "UpdateItem",
+            "key" : {
+                "id" : $util.dynamodb.toDynamoDBJson("QUESTION"),
+                "sort" : $util.dynamodb.toDynamoDBJson($id)
+            },
+            "update":{
+              "expression" : "set question=:question, answer = :answer, #order = :order",
+              "expressionNames" : {
+                "#order" : "order"
+              }, 
+              "expressionValues" : {
+                ":question" : $utils.dynamodb.toDynamoDBJson($context.arguments.question.question),
+                ":answer" : $utils.dynamodb.toDynamoDBJson($context.arguments.question.answer),
+                ":order" : $utils.dynamodb.toDynamoDBJson($count)
+              }
+            }
+        }
+      ResponseMappingTemplate: >
+        {
+          "idQuestion": $util.toJson($ctx.result.sort),                            
+          "question": $util.toJson($ctx.result.question),
+          "answer": $util.toJson($ctx.result.answer),
+          "order": $util.toJson($ctx.result.order)
+        }
+
+ # Resolver: Mutation - deleteQuestion
+  DeleteQuestionResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApi.ApiId
+      TypeName: Mutation
+      FieldName: deleteQuestion
+      DataSourceName: !GetAtt StepFunctionsHttpDataSource.Name
+      RequestMappingTemplate: !Sub >
+        {
+          "version": "2018-05-29",
+          "method": "POST",
+          "resourcePath": "/",
+          "params": {
+            "headers": {
+              "content-type": "application/x-amz-json-1.0",
+              "x-amz-target":"AWSStepFunctions.StartSyncExecution"
+            },
+            "body": {
+              "stateMachineArn": "${DeleteQuestionStateMachine}",
+              "input": "{ \"questionId\": $util.escapeJavaScript($util.toJson($ctx.args.questionId))}"
+            }
+          }
+        }
+      ResponseMappingTemplate: $ctx.result.body
+
+ # Resolver: Mutation - updateQuestion
+  UpdateQuestionResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApi.ApiId
+      TypeName: Mutation
+      FieldName: updateQuestion
+      DataSourceName: !GetAtt AppSyncTableDataSource.Name
+      RequestMappingTemplate: >        
+        {
+            "version" : "2017-02-28",
+            "operation" : "UpdateItem",
+            "key" : {
+                "id" : $util.dynamodb.toDynamoDBJson("QUESTION"),
+                "sort" : $util.dynamodb.toDynamoDBJson($context.arguments.question.idQuestion)
+            },
+            "update":{
+              "expression" : "set question=:question, answer = :answer",
+              "expressionValues" : {
+                ":question" : $utils.dynamodb.toDynamoDBJson($context.arguments.question.question),
+                ":answer" : $utils.dynamodb.toDynamoDBJson($context.arguments.question.answer)
+              }
+            }
+        }
+      ResponseMappingTemplate: >
+        {
+          "idQuestion": $util.toJson($ctx.result.sort),                            
+          "question": $util.toJson($ctx.result.question),
+          "answer": $util.toJson($ctx.result.answer),
+          "order": $util.toJson($ctx.result.order)
+        }
+
+ # Resolver: Mutation - orderQuestions
+  OrderQuestionsResolver:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      ApiId: !GetAtt AppSyncApi.ApiId
+      TypeName: Mutation
+      FieldName: orderQuestions
+      DataSourceName: !GetAtt StepFunctionsHttpDataSource.Name
+      RequestMappingTemplate: !Sub >
+        {
+          "version": "2018-05-29",
+          "method": "POST",
+          "resourcePath": "/",
+          "params": {
+            "headers": {
+              "content-type": "application/x-amz-json-1.0",
+              "x-amz-target":"AWSStepFunctions.StartSyncExecution"
+            },
+            "body": {
+              "stateMachineArn": "${OrderQuestionsStateMachine}",
+              "input": "$util.escapeJavaScript($util.toJson($ctx.args.questions))"
+            }
+          }
+        }
+      ResponseMappingTemplate: $ctx.result.body
+
+ # Resolver: Mutation - checkAnswers2
+  CheckAnswers2Resolver:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      ApiId: !GetAtt AppSyncApi.ApiId
+      TypeName: Mutation
+      FieldName: checkAnswers2
+      DataSourceName: !GetAtt StepFunctionsHttpDataSource.Name
+      RequestMappingTemplate: !Sub >
+        {
+          "version": "2018-05-29",
+          "method": "POST",
+          "resourcePath": "/",
+          "params": {
+            "headers": {
+              "content-type": "application/x-amz-json-1.0",
+              "x-amz-target":"AWSStepFunctions.StartSyncExecution"
+            },
+            "body": {
+              "stateMachineArn": "${CheckAnswers2StateMachine}",
+              "input": "{ \"answers\": $util.escapeJavaScript($util.toJson($ctx.args.answers))}"
+            }
+          }
+        }
+      ResponseMappingTemplate: $ctx.result.body
+
+ # Resolver: Mutation - createRequest
+  CreateRequestResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApi.ApiId
+      TypeName: Mutation
+      FieldName: createRequest
+      DataSourceName: !GetAtt StepFunctionsHttpDataSource.Name
+      RequestMappingTemplate: !Sub >
+        {
+          "version": "2018-05-29",
+          "method": "POST",
+          "resourcePath": "/",
+          "params": {
+            "headers": {
+              "content-type": "application/x-amz-json-1.0",
+              "x-amz-target":"AWSStepFunctions.StartSyncExecution"
+            },
+            "body": {
+              "stateMachineArn": "${CreateRequestStateMachine}",
+              "input": "{}"
+            }
+          }
+        }
+      ResponseMappingTemplate: $ctx.result.body
+
+ # Resolver: Mutation - approveRequest
+  ApproveRequestResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApi.ApiId
+      TypeName: Mutation
+      FieldName: approveRequest
+      DataSourceName: !GetAtt StepFunctionsHttpDataSource.Name
+      RequestMappingTemplate: !Sub >
+        {
+          "version": "2018-05-29",
+          "method": "POST",
+          "resourcePath": "/",
+          "params": {
+            "headers": {
+              "content-type": "application/x-amz-json-1.0",
+              "x-amz-target":"AWSStepFunctions.StartSyncExecution"
+            },
+            "body": {
+              "stateMachineArn": "${ApproveRequestStateMachine}",
+              "input": "{}"
+            }
+          }
+        }
+      ResponseMappingTemplate: $ctx.result.body
+
+   # Resolver: Query - getAffidavit
+  GetAffidavitResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApi.ApiId
+      TypeName: Query
+      FieldName: getAffidavit
+      DataSourceName: !GetAtt AppSyncTableDataSource.Name
+      RequestMappingTemplate: >
+        {
+          "version": "2017-02-28",
+          "operation": "GetItem",
+          "key": {
+            "id": $util.dynamodb.toDynamoDBJson("PROCESS_REQUEST"),
+            "sort": $util.dynamodb.toDynamoDBJson("SW-00001")
+          }
+        }
+      ResponseMappingTemplate: >
+        {
+          "idQuestion": $util.toJson($ctx.result['sort']),
+          "quizAnswer": $util.toJson($ctx.result['quizAnswer']),
+          "quizTime": $util.toJson($ctx.result['quizTime']), 
+          "state": $util.toJson($ctx.result['state'])
+        }
+
+ # Resolver: Mutation - putTest
+  PutTestResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApi.ApiId
+      TypeName: Mutation
+      FieldName: putTest
+      DataSourceName: !GetAtt StepFunctionsHttpDataSource.Name
+      RequestMappingTemplate: !Sub >
+        {
+          "version": "2018-05-29",
+          "method": "POST",
+          "resourcePath": "/",
+          "params": {
+            "headers": {
+              "content-type": "application/x-amz-json-1.0",
+              "x-amz-target":"AWSStepFunctions.StartSyncExecution"
+            },
+            "body": {
+              "stateMachineArn": "${PutTestStateMachine}",
+              "input": "{ \"test\": $util.escapeJavaScript($util.toJson($ctx.args.test))}"
+            }
+          }
+        }
+      ResponseMappingTemplate: $ctx.result.body
+
+ # Resolver: Mutation - putTest
+  UpdateTestResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApi.ApiId
+      TypeName: Mutation
+      FieldName: updateTest
+      DataSourceName: !GetAtt StepFunctionsHttpDataSource.Name
+      RequestMappingTemplate: !Sub >
+        {
+          "version": "2018-05-29",
+          "method": "POST",
+          "resourcePath": "/",
+          "params": {
+            "headers": {
+              "content-type": "application/x-amz-json-1.0",
+              "x-amz-target":"AWSStepFunctions.StartSyncExecution"
+            },
+            "body": {
+              "stateMachineArn": "${UpdateTestStateMachine}",
+              "input": "{ \"test\": $util.escapeJavaScript($util.toJson($ctx.args.test))}"
+            }
+          }
+        }
+      ResponseMappingTemplate: $ctx.result.body
+
+ # Resolver: Mutation - updateFunctionTest
+  UpdateFunctionTestResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApi.ApiId
+      TypeName: Mutation
+      FieldName: updateFunctionTest
+      DataSourceName: !GetAtt StepFunctionsHttpDataSource.Name
+      RequestMappingTemplate: !Sub >
+        {
+          "version": "2018-05-29",
+          "method": "POST",
+          "resourcePath": "/",
+          "params": {
+            "headers": {
+              "content-type": "application/x-amz-json-1.0",
+              "x-amz-target":"AWSStepFunctions.StartSyncExecution"
+            },
+            "body": {
+              "stateMachineArn": "${UpdateFunctionTestStateMachine}",
+              "input": "{ \"data\": $util.escapeJavaScript($util.toJson($ctx.args.data))}"
+            }
+          }
+        }
+      ResponseMappingTemplate: $ctx.result.body
+
+ # Resolver: Mutation - updateResolverTest
+  UpdateResolverTestResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApi.ApiId
+      TypeName: Mutation
+      FieldName: updateResolverTest
+      DataSourceName: !GetAtt AppSyncTableDataSource.Name
+      RequestMappingTemplate: >
+        {
+            "version" : "2018-05-29",
+            "operation" : "UpdateItem",
+            "key" : {
+                "id" : $util.dynamodb.toDynamoDBJson("UPDATE"),
+                "sort" : $util.dynamodb.toDynamoDBJson("TEST")
+            },
+            "update" : {
+              "expression" : "set data1=:data1, data2=:data2 #if(!$util.isNullOrEmpty($ctx.args.data3)) , data3=:data3#end",
+              "expressionValues" : {
+                ":data1": $utils.dynamodb.toDynamoDBJson($ctx.args.data1),
+                ":data2": $utils.dynamodb.toDynamoDBJson($ctx.args.data2)
+                #if(!$util.isNullOrEmpty($ctx.args.data3))
+                ,":data3": $utils.dynamodb.toDynamoDBJson($ctx.args.data3)
+                #end
+              }
+            }
+        }
+      ResponseMappingTemplate: >
+        {
+          "data1": $util.toJson($ctx.result.data1), 
+          "data2": $util.toJson($ctx.result.data2), 
+          "data3": $util.toJson($ctx.result.data3)
+        }
+
+ ###############      
+ ## LOGS      ##
+ ###############  
+
+  OrderQuestionsLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/vendedlogs/states/${AWS::StackName}/order-questions
+      RetentionInDays: 3 
+
+  CheckAnswers2Logs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/vendedlogs/states/${AWS::StackName}/check-answers
+      RetentionInDays: 3
+      
+  DeleteQuestionLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/vendedlogs/states/${AWS::StackName}/delete-question
+      RetentionInDays: 3
+
+  CreateRequestLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/vendedlogs/states/${AWS::StackName}/create-request
+      RetentionInDays: 3
+
+  ApproveRequestLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/vendedlogs/states/${AWS::StackName}/approve-request
+      RetentionInDays: 3
+
+  PutTestLog:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/vendedlogs/states/${AWS::StackName}/put-test
+      RetentionInDays: 3
+
+  UpdateTestLog:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/vendedlogs/states/${AWS::StackName}/update-test
+      RetentionInDays: 3
+
+  UpdateFunctionTestLog:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/vendedlogs/states/${AWS::StackName}/update-function-test
+      RetentionInDays: 3
+
+ ###################      
+ ## STATEMACHINES ##
+ ###################
+
+  OrderQuestionsStateMachine:
+    Type: AWS::Serverless::StateMachine 
+    Properties:
+      Type: EXPRESS
+      Name: orderQuestionsStateMachine
+      DefinitionUri: statemachines/order-questions.asl.json
+      DefinitionSubstitutions:
+        DDBDeleteItem: !Sub arn:${AWS::Partition}:states:::dynamodb:deleteItem
+        DDBUpdateItem: !Sub arn:${AWS::Partition}:states:::dynamodb:updateItem
+        DDBGetItem: !Sub arn:${AWS::Partition}:states:::dynamodb:getItem
+        TableName: !Ref BDOfficios
+      Logging:
+        Destinations:
+          - CloudWatchLogsLogGroup:
+              LogGroupArn: !GetAtt OrderQuestionsLogs.Arn
+        IncludeExecutionData: true
+        Level: ALL   
+      Policies: 
+        - DynamoDBCrudPolicy:
+            TableName: !Ref BDOfficios 
+        - CloudWatchLogsFullAccess
+  DeleteQuestionStateMachine:
+    Type: AWS::Serverless::StateMachine 
+    Properties:
+      Type: EXPRESS
+      Name: deleteQuestionStateMachine
+      DefinitionUri: statemachines/delete-question.asl.json
+      DefinitionSubstitutions:
+        DDBDeleteItem: !Sub arn:${AWS::Partition}:states:::dynamodb:deleteItem
+        DDBUpdateItem: !Sub arn:${AWS::Partition}:states:::dynamodb:updateItem
+        DDBQuery: arn:aws:states:::aws-sdk:dynamodb:query
+        TableName: !Ref BDOfficios
+      Logging:
+        Destinations:
+          - CloudWatchLogsLogGroup:
+              LogGroupArn: !GetAtt DeleteQuestionLogs.Arn
+        IncludeExecutionData: true
+        Level: ALL   
+      Policies: 
+        - DynamoDBCrudPolicy:
+            TableName: !Ref BDOfficios 
+        - CloudWatchLogsFullAccess
+  CheckAnswers2StateMachine:
+    Type: AWS::Serverless::StateMachine 
+    Properties:
+      Type: EXPRESS
+      Name: checkAnswers2StateMachine
+      DefinitionUri: statemachines/check-answers.asl.json
+      DefinitionSubstitutions:
+        DDBDeleteItem: !Sub arn:${AWS::Partition}:states:::dynamodb:deleteItem
+        DDBUpdateItem: !Sub arn:${AWS::Partition}:states:::dynamodb:updateItem
+        DDBGetItem: !Sub arn:${AWS::Partition}:states:::dynamodb:getItem
+        DDBQuery: arn:aws:states:::aws-sdk:dynamodb:query
+        TableName: !Ref BDOfficios
+        AnswerCheck2FunctionArn: !GetAtt AnswerCheck2Function.Arn
+      Logging:
+        Destinations:
+          - CloudWatchLogsLogGroup:
+              LogGroupArn: !GetAtt CheckAnswers2Logs.Arn
+        IncludeExecutionData: true
+        Level: ALL   
+      Policies: 
+        - LambdaInvokePolicy:
+            FunctionName: !Ref AnswerCheck2Function
+        - DynamoDBCrudPolicy:
+            TableName: !Ref BDOfficios 
+        - CloudWatchLogsFullAccess
+  ApproveRequestStateMachine:
+    Type: AWS::Serverless::StateMachine 
+    Properties:
+      Type: EXPRESS
+      Name: approveRequestStateMachine
+      DefinitionUri: statemachines/approve-request.asl.json
+      DefinitionSubstitutions:
+        UpdateToJsonArn: !GetAtt UpdateToJson.Arn
+      Logging:
+        Destinations:
+          - CloudWatchLogsLogGroup:
+              LogGroupArn: !GetAtt ApproveRequestLogs.Arn
+        IncludeExecutionData: true
+        Level: ALL   
+      Policies: 
+        - LambdaInvokePolicy:
+            FunctionName: !Ref UpdateToJson
+        - CloudWatchLogsFullAccess
+  CreateRequestStateMachine:
+    DependsOn: ApproveRequestStateMachine
+    Type: AWS::Serverless::StateMachine 
+    Properties:
+      Type: EXPRESS
+      Name: createRequestStateMachine
+      DefinitionUri: statemachines/create-request.asl.json
+      DefinitionSubstitutions:
+        ApproveR: !GetAtt ApproveRequestStateMachine.Arn
+        NadaFunctionArn: !GetAtt NadaFunction.Arn
+        DDBGetItem: !Sub arn:${AWS::Partition}:states:::dynamodb:getItem
+        TableName: !Ref BDOfficios
+      Logging:
+        Destinations:
+          - CloudWatchLogsLogGroup:
+              LogGroupArn: !GetAtt CreateRequestLogs.Arn
+        IncludeExecutionData: true
+        Level: ALL   
+      Policies: 
+        - LambdaInvokePolicy:
+            FunctionName: !Ref NadaFunction
+        - DynamoDBCrudPolicy:
+            TableName: !Ref BDOfficios 
+        - StepFunctionsExecutionPolicy:
+            StateMachineName: !GetAtt ApproveRequestStateMachine.Name
+        - CloudWatchLogsFullAccess
+  PutTestStateMachine:
+    Type: AWS::Serverless::StateMachine 
+    Properties:
+      Type: EXPRESS
+      Name: putTestStateMachine
+      DefinitionUri: statemachines/put-test.asl.json
+      DefinitionSubstitutions:
+        DDBGetItem: !Sub arn:${AWS::Partition}:states:::dynamodb:getItem
+        DDBDeleteItem: !Sub arn:${AWS::Partition}:states:::dynamodb:deleteItem
+        DDBUpdateItem: !Sub arn:${AWS::Partition}:states:::dynamodb:updateItem
+        DDBPutItem: !Sub arn:${AWS::Partition}:states:::dynamodb:putItem
+        DDBQuery: arn:aws:states:::aws-sdk:dynamodb:query
+        TableName: !Ref BDOfficios
+      Logging:
+        Destinations:
+          - CloudWatchLogsLogGroup:
+              LogGroupArn: !GetAtt PutTestLog.Arn
+        IncludeExecutionData: true
+        Level: ALL   
+      Policies: 
+        - DynamoDBCrudPolicy:
+            TableName: !Ref BDOfficios 
+        - CloudWatchLogsFullAccess
+  UpdateTestStateMachine:
+    Type: AWS::Serverless::StateMachine 
+    Properties:
+      Type: EXPRESS
+      Name: updateTestStateMachine
+      DefinitionUri: statemachines/update-test.asl.json
+      DefinitionSubstitutions:
+        DDBGetItem: !Sub arn:${AWS::Partition}:states:::dynamodb:getItem
+        DDBUpdateItem: !Sub arn:${AWS::Partition}:states:::dynamodb:updateItem
+        DDBQuery: arn:aws:states:::aws-sdk:dynamodb:query
+        TableName: !Ref BDOfficios
+      Logging:
+        Destinations:
+          - CloudWatchLogsLogGroup:
+              LogGroupArn: !GetAtt UpdateTestLog.Arn
+        IncludeExecutionData: true
+        Level: ALL   
+      Policies: 
+        - DynamoDBCrudPolicy:
+            TableName: !Ref BDOfficios 
+        - CloudWatchLogsFullAccess
+  UpdateFunctionTestStateMachine:
+    Type: AWS::Serverless::StateMachine 
+    Properties:
+      Type: EXPRESS
+      Name: updateFunctionTestStateMachine
+      DefinitionUri: statemachines/update-function-test.asl.json
+      DefinitionSubstitutions:
+        TableName: !Ref BDOfficios
+        UpdateFunctionArn: !GetAtt UpdateFunction.Arn
+      Logging:
+        Destinations:
+          - CloudWatchLogsLogGroup:
+              LogGroupArn: !GetAtt UpdateFunctionTestLog.Arn
+        IncludeExecutionData: true
+        Level: ALL   
+      Policies: 
+        - LambdaInvokePolicy:
+            FunctionName: !Ref UpdateFunction
+        - DynamoDBCrudPolicy:
+            TableName: !Ref BDOfficios 
+        - CloudWatchLogsFullAccess
+  
+
+  # DynamoDB
+  BDOfficios:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: ofvi-Officio
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+        - AttributeName: sort
+          AttributeType: S        
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+        - AttributeName: sort
+          KeyType: RANGE
+      ProvisionedThroughput:
+        ReadCapacityUnits: 1
+        WriteCapacityUnits: 1
+
+ ######################
+ ## Amazon S3 bucket ##
+ ######################
+  TemplateBucket:
+    Type: AWS::S3::Bucket
+
+  # Functions
+
+  AnswerCheckFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: functions/answer-check
+      Handler: handler
+      Runtime: go1.x
+      MemorySize: 128    
+      Timeout: 5
+      Policies:
+        - AWSLambdaBasicExecutionRole
+
+  AnswerCheck2Function:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: functions/answer-check2
+      Handler: handler
+      Runtime: go1.x
+      MemorySize: 128    
+      Timeout: 5
+      Policies:
+        - AWSLambdaBasicExecutionRole
+  
+  QuestionsDataParser:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: functions/data-parser
+      Handler: handler
+      Runtime: go1.x
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - DynamoDBCrudPolicy:
+            TableName: !Ref BDOfficios
+
+  NadaFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: functions/nada
+      Handler: handler
+      Runtime: go1.x
+      Policies:
+        - AWSLambdaBasicExecutionRole
+
+  TestFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: functions/test-function
+      Handler: handler
+      Runtime: go1.x
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - DynamoDBCrudPolicy:
+            TableName: !Ref BDOfficios
+        - DynamoDBCrudPolicy:
+            TableName:  TablaPrueba
+
+### FUNCION PARA ACTUALIZAR RESPUESTAS DE LA DJ ###
+  QuestionsDataParser:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: functions/data-quiz-parser
+      Handler: ofvi-data-quiz-parser
+      Runtime: go1.x
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - DynamoDBCrudPolicy:
+            TableName: !Ref BDOfficios
+      Environment:
+        Variables:
+          TABLA_NAME: !Ref BDOfficios
+
+  QueryItems:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: functions/query-items
+      Handler: handler
+      Runtime: go1.x
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - DynamoDBCrudPolicy:
+            TableName: !Ref BDOfficios
+      Environment:
+        Variables:
+          TABLA_NAME: !Ref BDOfficios
+
+  UpdateToJson:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: functions/updatetojson
+      Handler: handler
+      Runtime: go1.x
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - DynamoDBCrudPolicy:
+            TableName: !Ref BDOfficios
+      Environment:
+        Variables:
+          TABLA_NAME: !Ref BDOfficios
+
+  UpdateFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: functions/update
+      Handler: handler
+      Runtime: go1.x
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - DynamoDBCrudPolicy:
+            TableName: !Ref BDOfficios
+      Environment:
+        Variables:
+          TABLA_NAME: !Ref BDOfficios
+
+  GetAllUsersFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: functions/get-all-users
+      Handler: ofvi-get-all-users
+      Runtime: go1.x
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - DynamoDBCrudPolicy:
+            TableName: !Ref BDOfficios
+      Environment:
+        Variables:
+          REGION: !Sub ${AWS::Region}
+          TABLA_NAME: !Ref BDOfficios
+
+  CreateCognitoUserFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: functions/create-cognito-user
+      Handler: ofvi-create-cognito-user
+      Runtime: go1.x
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - DynamoDBCrudPolicy:
+            TableName: !Ref BDOfficios
+      Environment:
+        Variables:
+          USER_POOL_ID: !Ref UserPool
+          APP_CLIENT_ID: !Ref UserPoolClientTest
+      Policies:
+        - Statement:
+          - Sid: CognitoPolicy
+            Effect: Allow
+            Action: 
+              - cognito-idp:AdminCreateUser
+            Resource: "*"
+
+  SendEmailFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: functions/send-mail
+      Handler: ofvi-send-email
+      Runtime: go1.x
+      MemorySize: 128    
+      Timeout: 60
+      Environment:
+        Variables:
+          BucketName: !Ref TemplateBucket
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - S3ReadPolicy:
+            BucketName: !Ref TemplateBucket
+        - Statement:
+          - Sid: SESPolicy
+            Effect: Allow
+            Action:
+              - ses:SendEmail
+            Resource: '*' 
+      Events:
+        CustomMessage:
+          Type: Cognito
+          Properties:
+            UserPool: !Ref UserPool
+            Trigger: CustomMessage
+
+Outputs:
+  APIKey:
+    Description: API Key
+    Value: !GetAtt AppSyncApiKey.ApiKey
+  GraphQLApiEndpoint:
+    Description: The URL to the GraphQL Endpoint
+    Value: !GetAtt AppSyncApi.GraphQLUrl
+  GraphQLApiId:
+    Description: The API ID of the GraphQL API
+    Value: !GetAtt AppSyncApi.ApiId         

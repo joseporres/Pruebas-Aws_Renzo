@@ -1,0 +1,96 @@
+{
+    "Comment": "Check Answers",
+    "StartAt": "Get Correct Answers",
+    "States": {
+        "Get Correct Answers": {
+            "Type": "Task",
+            "Resource": "${DDBQuery}",
+            "Parameters": {
+                "TableName": "${TableName}",
+                "KeyConditionExpression": "id=:id",
+                "ExpressionAttributeValues": {
+                    ":id": {
+                        "S": "QUESTION"
+                    }
+                },
+                "ProjectionExpression": "sort,answer,question"
+            },
+            "ResultPath": "$.result",
+            "Next": "Check Answer"
+        },
+        "Check Answer": {
+            "Type": "Task",
+            "Resource": "${AnswerCheck2FunctionArn}",
+            "Parameters": {
+                "userAnswers.$": "$$.Execution.Input.answers",
+                "questions.$": "$.result.Items"
+            },
+            "ResultPath": "$.answers",
+            "Next": "Validate Answer"
+        },
+        "Validate Answer": {
+            "Type": "Choice",
+            "Choices": [
+                {
+                    "Variable": "$.answers.state",
+                    "NumericEquals": 6,
+                    "Next": "Incorrect"
+                }
+            ],
+            "Default": "Save in BD"
+        },
+        "Save in BD": {
+            "Type": "Task",
+            "Resource": "${DDBUpdateItem}",
+            "Parameters": {
+                "TableName": "${TableName}",
+                "Key": {
+                    "id": {
+                        "S": "PROCESS_REQUEST"
+                    },
+                    "sort": {
+                        "S": "SW-00001"
+                    }
+                },
+                "ExpressionAttributeNames": {
+                    "#state": "state"
+                },
+                "ExpressionAttributeValues": {
+                    ":quizAnswer.$": "$.answers.quizAnswers",
+                    ":quizTime": {
+                        "S.$": "$$.Execution.StartTime"
+                    },
+                    ":state": {
+                        "N": "5"
+                    }
+                },
+                "ReturnValues": "ALL_NEW",
+                "UpdateExpression": "SET quizAnswer=:quizAnswer, #state=:state, quizTime=:quizTime"
+            },
+            "ResultSelector": {
+                "id.$": "$.Attributes.id.S",
+                "caseId.$": "$.Attributes.sort.S",
+                "quizAnswer.$": "$.Attributes.quizAnswer",
+                "quizTime.$": "$.Attributes.quizTime.S",
+                "state.$": "$.Attributes.state.N"
+            },
+            "Next": "Correct"
+        },
+        "Correct": {
+            "Type": "Pass",
+            "Parameters": {
+                "respuesta": "SI"
+            },
+            "OutputPath": "$",
+            "End": true           
+        },
+        "Incorrect": {
+            "Type": "Pass",
+            "Parameters": {
+                "respuesta": "NO"
+            },
+            "OutputPath": "$",
+            "End": true
+        }
+    }
+}
