@@ -54,6 +54,9 @@ type Event struct {
 }
 
 func (d *deps) handler(ctx context.Context, event Event) (string, error) {
+
+	var result string
+	var response []Response
 	// CONECTAR SESSION CON AWS
 	sess, err := session.NewSession(&aws.Config{
 		Region: aws.String(*aws.String("us-east-1"))},
@@ -77,26 +80,33 @@ func (d *deps) handler(ctx context.Context, event Event) (string, error) {
 
 	switch event.Case {
 	case 0: // SignUp
-		client.SignUp(event.Email, event.Password)
+		result, err = client.SignUp(event.Email, event.Password)
 	case 1: // AdminCreateUser
-		client.AdminCreateUser(event.Email, event.Name)
+		result, err = client.AdminCreateUser(event.Email, event.Name)
 	case 2: // AdminSetUserPassword
-		client.AdminSetUserPassword(event.Username, event.Password)
+		result, err = client.AdminSetUserPassword(event.Username, event.Password)
 	case 3: // SignIn
-		client.SignIn(event.Email, event.Password)
+		result, err = client.SignIn(event.Email, event.Password)
 	case 4: // ResendConfirmationCode
-		client.ResendConfirmationCode(event.Email, event.Password)
+		result, err = client.ResendConfirmationCode(event.Email, event.Password)
 	case 5: // ConfirmSignUp
-		client.ConfirmSignUp(event.Email, event.Username, event.ConfirmationCode)
+		result, err = client.ConfirmSignUp(event.Email, event.Username, event.ConfirmationCode)
 	case 6: // GetUser
-		client.getUser(event.Email)
+		response, err = client.getUser(event.Email)
 	case 7: // ListUsers
-		client.ListUsers()
+		response, err = client.ListUsers()
 	case 8: // AdminGetUser
-		client.AdminGetUser(event.Username)
+		result, err = client.AdminGetUser(event.Username)
 	}
 
-	fmt.Print(client)
+	if err != nil {
+		fmt.Println("Error :", err)
+		return "", err
+	}
+	fmt.Println("CLIENTE :", client)
+	fmt.Println("Response :", response)
+	fmt.Println("result :", result)
+
 	return "", nil
 }
 
