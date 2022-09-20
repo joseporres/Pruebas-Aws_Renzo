@@ -18,7 +18,9 @@ type CognitoClient interface {
 	SignUp(email string, password string) (string, error)
 	AdminCreateUser(email string) (string, error)
 	AdminSetUserPassword(username string, password string) (string error)
-	SignIn(email string, password string) (error, string)
+	SignIn(email string, password string) (string error)
+	ConfirmSignUp(email string, username string, confirmationCode string) (string error)
+	ResendConfirmationCode(email string, username string) (string error)
 }
 
 type awsCognitoClient struct {
@@ -28,11 +30,12 @@ type awsCognitoClient struct {
 }
 
 type Event struct {
-	Email    string `json:"email"`
-	Username string `json:"username"`
-	Password string `json:"password"`
-	Name     string `json:"name"`
-	Case     int    `json:"case"`
+	Email            string `json:"email"`
+	Username         string `json:"username"`
+	Password         string `json:"password"`
+	Name             string `json:"name"`
+	ConfirmationCode string `json:"confirmationCode"`
+	Case             int    `json:"case"`
 }
 
 func (d *deps) handler(ctx context.Context, event Event) (string, error) {
@@ -66,6 +69,10 @@ func (d *deps) handler(ctx context.Context, event Event) (string, error) {
 		client.AdminSetUserPassword(event.Username, event.Password)
 	case 3: // SignIn
 		client.SignIn(event.Email, event.Password)
+	case 4: // SignIn
+		client.ResendConfirmationCode(event.Email, event.Password)
+	case 5: // ConfirmSignUp
+		client.ConfirmSignUp(event.Email, event.Username, event.ConfirmationCode)
 	}
 
 	fmt.Print(client)
@@ -161,5 +168,38 @@ func (ctx *awsCognitoClient) SignIn(email string, password string) (string, erro
 		return "", err
 	}
 
+	return result.String(), nil
+}
+
+func (ctx *awsCognitoClient) ConfirmSignUp(email string, username string, confirmationCode string) (string, error) {
+
+	user := &cognito.ConfirmSignUpInput{
+		ClientId:         aws.String(ctx.appClientId),
+		ConfirmationCode: aws.String(confirmationCode),
+		Username:         aws.String(username),
+	}
+	fmt.Println("USER: aaaa ", user.Username)
+
+	result, err := ctx.cognitoClient.ConfirmSignUp(user)
+	if err != nil {
+		fmt.Println("Error :", err)
+		return "", err
+	}
+	return result.String(), nil
+}
+
+func (ctx *awsCognitoClient) ResendConfirmationCode(email string, username string) (string, error) {
+
+	user := &cognito.ResendConfirmationCodeInput{
+		ClientId: aws.String(ctx.appClientId),
+		Username: aws.String(username),
+	}
+	fmt.Println("USER: aaaa ", user.Username)
+
+	result, err := ctx.cognitoClient.ResendConfirmationCode(user)
+	if err != nil {
+		fmt.Println("Error :", err)
+		return "", err
+	}
 	return result.String(), nil
 }
