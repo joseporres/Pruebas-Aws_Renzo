@@ -27,6 +27,7 @@ type CognitoClient interface {
 	AdminGetUser(username string) (string error)
 	AdminDisableUser(username string) (string, error)
 	AdminEnableUser(username string) (string, error)
+	ChangePasswordUser(email string, password string, newPassword string) (string, error)
 }
 
 type awsCognitoClient struct {
@@ -50,6 +51,7 @@ type Event struct {
 	Email            string `json:"email"`
 	Username         string `json:"username"`
 	Password         string `json:"password"`
+	NewPassword      string `json:"newPassword"`
 	Name             string `json:"name"`
 	ConfirmationCode string `json:"confirmationCode"`
 	Case             int    `json:"case"`
@@ -103,6 +105,8 @@ func (d *deps) handler(ctx context.Context, event Event) (string, error) {
 		result, err = client.AdminDisableUser(event.Username)
 	case 10: // AdminEnableUser
 		result, err = client.AdminEnableUser(event.Username)
+	case 11: // ChangePassword
+		result, err = client.ChangePasswordUser(event.Email, event.Password, event.NewPassword)
 	}
 
 	if err != nil {
@@ -351,4 +355,44 @@ func (ctx awsCognitoClient) AdminEnableUser(username string) (string, error) {
 	}
 
 	return result.String(), nil
+}
+
+func (ctx *awsCognitoClient) ChangePasswordUser(email string, password string, newPassword string) (string, error) {
+
+	initiateAuthInput := &cognito.InitiateAuthInput{
+		AuthFlow: aws.String("USER_PASSWORD_AUTH"),
+		AuthParameters: aws.StringMap(map[string]string{
+			"USERNAME": email,
+			"PASSWORD": password,
+		}),
+		ClientId: aws.String(ctx.appClientId),
+	}
+
+	result, err := ctx.cognitoClient.InitiateAuth(initiateAuthInput)
+
+	if err != nil {
+		fmt.Println("Error  : InitiateAuth", err)
+		return "", err
+	}
+	fmt.Println(result)
+
+	accessToken := result.AuthenticationResult.AccessToken
+
+	fmt.Println("Token expires in ", result.AuthenticationResult.ExpiresIn)
+	fmt.Println("AccessToken: ", accessToken)
+
+	changePasswordInput := &cognito.ChangePasswordInput{
+		AccessToken:      aws.String(*result.AuthenticationResult.AccessToken),
+		PreviousPassword: aws.String(password),
+		ProposedPassword: aws.String(newPassword),
+	}
+
+	result2, err2 := ctx.cognitoClient.ChangePassword(changePasswordInput)
+
+	if err2 != nil {
+		fmt.Println("Error  : ChangePassword", err2)
+		return "", err2
+	}
+
+	return result2.String(), nil
 }
