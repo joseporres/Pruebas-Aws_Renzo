@@ -25,9 +25,11 @@ type CognitoClient interface {
 	getUser(email string) ([]Response, error)
 	ListUsers() ([]Response, error)
 	AdminGetUser(username string) (string error)
-	AdminDisableUser(username string) (string, error)
-	AdminEnableUser(username string) (string, error)
-	ChangePasswordUser(email string, password string, newPassword string) (string, error)
+	AdminDisableUser(username string) (string error)
+	AdminEnableUser(username string) (string error)
+	ChangePasswordUser(email string, password string, newPassword string) (string error)
+	ForgotPassword(email string, password string, username string) (string error)
+	ConfirmForgotPassword(email string, newPassword string, username string, confirmationCode string) (string error)
 }
 
 type awsCognitoClient struct {
@@ -107,6 +109,10 @@ func (d *deps) handler(ctx context.Context, event Event) (string, error) {
 		result, err = client.AdminEnableUser(event.Username)
 	case 11: // ChangePassword
 		result, err = client.ChangePasswordUser(event.Email, event.Password, event.NewPassword)
+	case 12: // ChangePassword
+		result, err = client.ForgotPassword(event.Email, event.Password, event.Username)
+	case 13: // ChangePassword
+		result, err = client.ConfirmForgotPassword(event.Email, event.NewPassword, event.Username, event.ConfirmationCode)
 	}
 
 	if err != nil {
@@ -388,6 +394,44 @@ func (ctx *awsCognitoClient) ChangePasswordUser(email string, password string, n
 	}
 
 	result2, err2 := ctx.cognitoClient.ChangePassword(changePasswordInput)
+
+	if err2 != nil {
+		fmt.Println("Error  : ChangePassword", err2)
+		return "", err2
+	}
+
+	return result2.String(), nil
+}
+
+func (ctx *awsCognitoClient) ForgotPassword(email string, password string, username string) (string, error) {
+
+	forgotPasswordInput := &cognito.ForgotPasswordInput{
+		ClientId: aws.String("1q1ima4dt8821ehja023i7uljh"),
+		Username: aws.String(username),
+	}
+
+	result2, err2 := ctx.cognitoClient.ForgotPassword(forgotPasswordInput)
+
+	println(result2.CodeDeliveryDetails.DeliveryMedium)
+
+	if err2 != nil {
+		fmt.Println("Error  : ChangePassword", err2)
+		return "", err2
+	}
+
+	return result2.String(), nil
+}
+
+func (ctx *awsCognitoClient) ConfirmForgotPassword(email string, newPassword string, username string, confirmationCode string) (string, error) {
+
+	confirmForgotPasswordInput := &cognito.ConfirmForgotPasswordInput{
+		ClientId:         aws.String("1q1ima4dt8821ehja023i7uljh"),
+		Username:         aws.String(username),
+		ConfirmationCode: aws.String(confirmationCode),
+		Password:         aws.String(newPassword),
+	}
+
+	result2, err2 := ctx.cognitoClient.ConfirmForgotPassword(confirmForgotPasswordInput)
 
 	if err2 != nil {
 		fmt.Println("Error  : ChangePassword", err2)
