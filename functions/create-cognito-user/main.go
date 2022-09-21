@@ -25,6 +25,8 @@ type CognitoClient interface {
 	getUser(email string) ([]Response, error)
 	ListUsers() ([]Response, error)
 	AdminGetUser(username string) (string error)
+	AdminDisableUser(username string) (string, error)
+	AdminEnableUser(username string) (string, error)
 }
 
 type awsCognitoClient struct {
@@ -97,6 +99,10 @@ func (d *deps) handler(ctx context.Context, event Event) (string, error) {
 		response, err = client.ListUsers()
 	case 8: // AdminGetUser
 		result, err = client.AdminGetUser(event.Username)
+	case 9: // AdminDisableUser
+		result, err = client.AdminDisableUser(event.Username)
+	case 10: // AdminEnableUser
+		result, err = client.AdminEnableUser(event.Username)
 	}
 
 	if err != nil {
@@ -311,5 +317,38 @@ func (ctx *awsCognitoClient) AdminGetUser(username string) (string, error) {
 	fmt.Println(result)
 
 	return result.String(), nil
+}
 
+func (ctx awsCognitoClient) AdminDisableUser(username string) (string, error) {
+
+	adminDisableUserInput := &cognito.AdminDisableUserInput{
+		UserPoolId: aws.String(ctx.userPoolId),
+		Username:   aws.String(username),
+	}
+
+	result, err := ctx.cognitoClient.AdminDisableUser(adminDisableUserInput)
+
+	if err != nil {
+		fmt.Println("Got error listing users")
+		os.Exit(1)
+	}
+
+	return result.String(), nil
+}
+
+func (ctx awsCognitoClient) AdminEnableUser(username string) (string, error) {
+
+	adminEnableUserInput := &cognito.AdminEnableUserInput{
+		UserPoolId: aws.String(ctx.userPoolId),
+		Username:   aws.String(username),
+	}
+
+	result, err := ctx.cognitoClient.AdminEnableUser(adminEnableUserInput)
+
+	if err != nil {
+		fmt.Println("Got error listing users")
+		os.Exit(1)
+	}
+
+	return result.String(), nil
 }
