@@ -83,7 +83,7 @@ func (d *deps) handler(ctx context.Context, event Event) (string, error) {
 	}
 	fmt.Printf("Email :%s Password: %s \n", event.Email, event.Password)
 	fmt.Println("cliente: ", client)
-
+	//s
 	switch event.Case {
 	case 0: // SignUp
 		result, err = client.SignUp(event.Email, event.Password, event.Name)
