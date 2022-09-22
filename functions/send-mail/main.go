@@ -82,13 +82,25 @@ func handler(ctx context.Context, event CognitoEventUserPoolsCustomMessage) (Cog
 		fmt.Println(err.Error())
 		return CognitoEventUserPoolsCustomMessage{}, err
 	}
+	var bodyHtml string
+	switch event.TriggerSource {
+		case "CustomMessage_SignUp":
+			bodyHtml = "signUpMail"
+		case "CustomMessage_ResendCode":
+			bodyHtml = "resendCodeMail"
+		case "CustomMessage_ForgotPassword":
+			bodyHtml = "forgotPasswordMail"
+		case "CustomMessage_AdminCreateUser":
+			bodyHtml = "adminCreateUserMail"
+	}
+
 	// CONECTAR SESSION CON S3
 	svc := s3.New(sess)
 	// OBTENER EL TEMPLATE HTML
 	rawObject, err := svc.GetObject(
 		&s3.GetObjectInput{
 			Bucket: aws.String(os.Getenv("BucketName")),
-			Key:    aws.String(fmt.Sprintf("%s.html", "externalUser")),
+			Key:    aws.String(fmt.Sprintf("%s.html", bodyHtml)),
 		})
 	if err != nil {
 		fmt.Println(err.Error())

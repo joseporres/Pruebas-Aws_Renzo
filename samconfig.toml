@@ -3,8 +3,10 @@ version = 0.1
 [default.deploy]
 [default.deploy.parameters]
 stack_name = "OficiosTest"
-s3_bucket = "aws-sam-cli-managed-default-samclisourcebucket-1vkcw4cqqfars"
+s3_bucket = "aws-sam-cli-managed-default-samclisourcebucket-1fn49rix9hvm8"
 s3_prefix = "OficiosTest"
 region = "us-east-1"
 capabilities = "CAPABILITY_IAM"
 image_repositories = []
+confirm_changeset = true
+disable_rollback = true

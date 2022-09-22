@@ -16,7 +16,7 @@ type deps struct {
 }
 
 type CognitoClient interface {
-	SignUp(email string, password string) (string, error)
+	SignUp(email string, password string, name string) (string, error)
 	AdminCreateUser(email string) (string error)
 	AdminSetUserPassword(username string, password string) (string error)
 	SignIn(email string, password string) (string error)
@@ -86,7 +86,7 @@ func (d *deps) handler(ctx context.Context, event Event) (string, error) {
 
 	switch event.Case {
 	case 0: // SignUp
-		result, err = client.SignUp(event.Email, event.Password)
+		result, err = client.SignUp(event.Email, event.Password, event.Name)
 	case 1: // AdminCreateUser
 		result, err = client.AdminCreateUser(event.Email, event.Name)
 	case 2: // AdminSetUserPassword
@@ -94,7 +94,7 @@ func (d *deps) handler(ctx context.Context, event Event) (string, error) {
 	case 3: // SignIn
 		result, err = client.SignIn(event.Email, event.Password)
 	case 4: // ResendConfirmationCode
-		result, err = client.ResendConfirmationCode(event.Email, event.Password)
+		result, err = client.ResendConfirmationCode(event.Email, event.Username)
 	case 5: // ConfirmSignUp
 		result, err = client.ConfirmSignUp(event.Email, event.Username, event.ConfirmationCode)
 	case 6: // GetUser
@@ -131,7 +131,7 @@ func main() {
 	lambda.Start(d.handler)
 }
 
-func (ctx *awsCognitoClient) SignUp(email string, password string) (string, error) {
+func (ctx *awsCognitoClient) SignUp(email string, password string, name string) (string, error) {
 
 	user := &cognito.SignUpInput{
 		ClientId: aws.String(ctx.appClientId),
@@ -142,7 +142,11 @@ func (ctx *awsCognitoClient) SignUp(email string, password string) (string, erro
 				Name:  aws.String("email"),
 				Value: aws.String(email),
 			},
-		},
+			{
+				Name:  aws.String("name"),
+				Value: aws.String(name),
+			},
+		},	
 	}
 	fmt.Println("USER: ", user)
 
@@ -168,7 +172,7 @@ func (ctx *awsCognitoClient) AdminCreateUser(email string, name string) (string,
 				Name:  aws.String("name"),
 				Value: aws.String(name),
 			},
-		},
+		},	
 	}
 	fmt.Println("USER: aaaa ", user)
 
