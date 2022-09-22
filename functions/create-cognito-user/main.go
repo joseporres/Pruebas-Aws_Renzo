@@ -109,9 +109,9 @@ func (d *deps) handler(ctx context.Context, event Event) (string, error) {
 		result, err = client.AdminEnableUser(event.Username)
 	case 11: // ChangePassword
 		result, err = client.ChangePasswordUser(event.Email, event.Password, event.NewPassword)
-	case 12: // ChangePassword
+	case 12: // ForgotPassword
 		result, err = client.ForgotPassword(event.Email, event.Password, event.Username)
-	case 13: // ChangePassword
+	case 13: // ConfirmForgotPassword
 		result, err = client.ConfirmForgotPassword(event.Email, event.NewPassword, event.Username, event.ConfirmationCode)
 	}
 
