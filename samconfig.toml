@@ -2,11 +2,9 @@ version = 0.1
 [default]
 [default.deploy]
 [default.deploy.parameters]
-stack_name = "OficiosTest"
-s3_bucket = "aws-sam-cli-managed-default-samclisourcebucket-1fn49rix9hvm8"
-s3_prefix = "OficiosTest"
+stack_name = "appsync-repo"
+s3_bucket = "aws-sam-cli-managed-default-samclisourcebucket-14pg44f3l6mfp"
+s3_prefix = "appsync-repo"
 region = "us-east-1"
 capabilities = "CAPABILITY_IAM"
 image_repositories = []
-confirm_changeset = true
-disable_rollback = true

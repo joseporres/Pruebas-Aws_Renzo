@@ -1409,14 +1409,20 @@ Resources:
           - Sid: CognitoPolicy
             Effect: Allow
             Action: 
-              - cognito-idp:AdminCreateUser
-              - cognito-idp:AdminSetUserPassword
               - cognito-idp:SignUp
-              - cognito-idp:InitiateAuth
+              - cognito-idp:AdminCreateUser
+              - cognito-idp:SignUp
               - cognito-idp:ConfirmSignUp
               - cognito-idp:ResendConfirmationCode
-              - cognito-idp:AdminGetUser
+              - cognito-idp:GetUser
               - cognito-idp:ListUsers
+              - cognito-idp:AdminGetUser
+              - cognito-idp:AdminDisableUser
+              - cognito-idp:AdminEnableUser
+              - cognito-idp:ChangePassword
+              - cognito-idp:ForgotPassword
+              - cognito-idp:ConfirmForgotPassword
+              - cognito-idp:InitiateAuth
             Resource: "*"
   SendEmailFunction:
     Type: AWS::Serverless::Function
