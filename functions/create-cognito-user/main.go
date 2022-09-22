@@ -146,13 +146,13 @@ func (ctx *awsCognitoClient) SignUp(email string, password string, name string) 
 				Name:  aws.String("name"),
 				Value: aws.String(name),
 			},
-		},	
+		},
 	}
 	fmt.Println("USER: ", user)
 
 	result, err := ctx.cognitoClient.SignUp(user)
 	if err != nil {
-		fmt.Println("Error :", err)
+		fmt.Println("Error : SignUp", err)
 		return "", err
 	}
 	return result.String(), nil
@@ -172,13 +172,13 @@ func (ctx *awsCognitoClient) AdminCreateUser(email string, name string) (string,
 				Name:  aws.String("name"),
 				Value: aws.String(name),
 			},
-		},	
+		},
 	}
-	fmt.Println("USER: aaaa ", user)
+	fmt.Println("USER: ", user)
 
 	result, err := ctx.cognitoClient.AdminCreateUser(user)
 	if err != nil {
-		fmt.Println("Error :", err)
+		fmt.Println("Error : AdminCreateUser", err)
 		return "", err
 	}
 	return result.String(), nil
@@ -195,7 +195,7 @@ func (ctx *awsCognitoClient) AdminSetUserPassword(username string, password stri
 
 	result, err := ctx.cognitoClient.AdminSetUserPassword(user)
 	if err != nil {
-		fmt.Println("Error :", err)
+		fmt.Println("Error : AdminSetUserPassword", err)
 		return "", err
 	}
 
@@ -214,6 +214,8 @@ func (ctx *awsCognitoClient) SignIn(email string, password string) (string, erro
 
 	result, err := ctx.cognitoClient.InitiateAuth(initiateAuthInput)
 
+	fmt.Println("Resultado de InitiateAuth: ", result)
+
 	if err != nil {
 		fmt.Println("Error  : InitiateAuth", err)
 		return "", err
@@ -229,11 +231,10 @@ func (ctx *awsCognitoClient) ConfirmSignUp(email string, username string, confir
 		ConfirmationCode: aws.String(confirmationCode),
 		Username:         aws.String(username),
 	}
-	fmt.Println("USER: aaaa ", user.Username)
 
 	result, err := ctx.cognitoClient.ConfirmSignUp(user)
 	if err != nil {
-		fmt.Println("Error :", err)
+		fmt.Println("Error : ConfirmSignUp", err)
 		return "", err
 	}
 	return result.String(), nil
@@ -245,11 +246,10 @@ func (ctx *awsCognitoClient) ResendConfirmationCode(email string, username strin
 		ClientId: aws.String(ctx.appClientId),
 		Username: aws.String(username),
 	}
-	fmt.Println("USER: aaaa ", user.Username)
 
 	result, err := ctx.cognitoClient.ResendConfirmationCode(user)
 	if err != nil {
-		fmt.Println("Error :", err)
+		fmt.Println("Error : ResendConfirmationCode", err)
 		return "", err
 	}
 	return result.String(), nil
@@ -265,7 +265,7 @@ func (ctx *awsCognitoClient) getUser(email string) ([]Response, error) {
 	result, err := ctx.cognitoClient.ListUsers(user)
 
 	if err != nil {
-		fmt.Println("Got error listing users")
+		fmt.Println("Got error ListUsers in function getUser")
 		os.Exit(1)
 	}
 
@@ -324,7 +324,7 @@ func (ctx *awsCognitoClient) AdminGetUser(username string) (string, error) {
 	result, err := ctx.cognitoClient.AdminGetUser(user)
 
 	if err != nil {
-		fmt.Println("Got error listing users")
+		fmt.Println("Error : AdminGetUser")
 		os.Exit(1)
 	}
 
@@ -343,7 +343,7 @@ func (ctx awsCognitoClient) AdminDisableUser(username string) (string, error) {
 	result, err := ctx.cognitoClient.AdminDisableUser(adminDisableUserInput)
 
 	if err != nil {
-		fmt.Println("Got error listing users")
+		fmt.Println("Error: AdminDisableUser")
 		os.Exit(1)
 	}
 
@@ -360,7 +360,7 @@ func (ctx awsCognitoClient) AdminEnableUser(username string) (string, error) {
 	result, err := ctx.cognitoClient.AdminEnableUser(adminEnableUserInput)
 
 	if err != nil {
-		fmt.Println("Got error listing users")
+		fmt.Println("Error: AdminEnableUser")
 		os.Exit(1)
 	}
 
@@ -384,6 +384,7 @@ func (ctx *awsCognitoClient) ChangePasswordUser(email string, password string, n
 		fmt.Println("Error  : InitiateAuth", err)
 		return "", err
 	}
+
 	fmt.Println(result)
 
 	accessToken := result.AuthenticationResult.AccessToken
@@ -438,7 +439,7 @@ func (ctx *awsCognitoClient) ConfirmForgotPassword(email string, newPassword str
 	result2, err2 := ctx.cognitoClient.ConfirmForgotPassword(confirmForgotPasswordInput)
 
 	if err2 != nil {
-		fmt.Println("Error  : ChangePassword", err2)
+		fmt.Println("Error  : ConfirmForgotPassword", err2)
 		return "", err2
 	}
 
