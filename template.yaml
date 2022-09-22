@@ -1411,7 +1411,7 @@ Resources:
             Action: 
               - cognito-idp:SignUp
               - cognito-idp:AdminCreateUser
-              - cognito-idp:SignUp
+              - cognito-idp:AdminSetUserPassword
               - cognito-idp:ConfirmSignUp
               - cognito-idp:ResendConfirmationCode
               - cognito-idp:GetUser
