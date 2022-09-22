@@ -62,8 +62,8 @@ Resources:
     Properties:
       UserPoolName: user-pool
       UsernameAttributes: [email]
-      # AutoVerifiedAttributes:
-      #   - phone_number
+      AutoVerifiedAttributes:
+      - email
       MfaConfiguration: "OFF"
       Schema:
         - Name: email
