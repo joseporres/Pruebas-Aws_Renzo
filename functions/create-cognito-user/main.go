@@ -94,7 +94,7 @@ func (d *deps) handler(ctx context.Context, event Event) (string, error) {
 	case 3: // SignIn
 		result, err = client.SignIn(event.Email, event.Password)
 	case 4: // ResendConfirmationCode
-		result, err = client.ResendConfirmationCode(event.Email, event.Password)
+		result, err = client.ResendConfirmationCode(event.Email, event.Username)
 	case 5: // ConfirmSignUp
 		result, err = client.ConfirmSignUp(event.Email, event.Username, event.ConfirmationCode)
 	case 6: // GetUser
