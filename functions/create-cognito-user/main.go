@@ -110,7 +110,7 @@ func (d *deps) handler(ctx context.Context, event Event) (string, error) {
 	case 11: // ChangePassword
 		result, err = client.ChangePasswordUser(event.Email, event.Password, event.NewPassword)
 	case 12: // ForgotPassword
-		result, err = client.ForgotPassword(event.Email, event.Password, event.Username)
+		result, err = client.ForgotPassword(event.Username)
 	case 13: // ConfirmForgotPassword
 		result, err = client.ConfirmForgotPassword(event.Email, event.NewPassword, event.Username, event.ConfirmationCode)
 	}
@@ -408,10 +408,10 @@ func (ctx *awsCognitoClient) ChangePasswordUser(email string, password string, n
 	return result2.String(), nil
 }
 
-func (ctx *awsCognitoClient) ForgotPassword(email string, password string, username string) (string, error) {
+func (ctx *awsCognitoClient) ForgotPassword(username string) (string, error) {
 
 	forgotPasswordInput := &cognito.ForgotPasswordInput{
-		ClientId: aws.String("1q1ima4dt8821ehja023i7uljh"),
+		ClientId: aws.String(ctx.appClientId),
 		Username: aws.String(username),
 	}
 
@@ -430,7 +430,7 @@ func (ctx *awsCognitoClient) ForgotPassword(email string, password string, usern
 func (ctx *awsCognitoClient) ConfirmForgotPassword(email string, newPassword string, username string, confirmationCode string) (string, error) {
 
 	confirmForgotPasswordInput := &cognito.ConfirmForgotPasswordInput{
-		ClientId:         aws.String("1q1ima4dt8821ehja023i7uljh"),
+		ClientId:         aws.String(ctx.appClientId),
 		Username:         aws.String(username),
 		ConfirmationCode: aws.String(confirmationCode),
 		Password:         aws.String(newPassword),
