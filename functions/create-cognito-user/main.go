@@ -28,7 +28,7 @@ type CognitoClient interface {
 	AdminDisableUser(username string) (string error)
 	AdminEnableUser(username string) (string error)
 	ChangePasswordUser(email string, password string, newPassword string) (string error)
-	ForgotPassword(email string, password string, username string) (string error)
+	ForgotPassword(username string) (string error)
 	ConfirmForgotPassword(email string, newPassword string, username string, confirmationCode string) (string error)
 }
 
