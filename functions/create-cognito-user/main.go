@@ -30,8 +30,6 @@ type CognitoClient interface {
 	ChangePasswordUser(email string, password string, newPassword string) (string error)
 	ForgotPassword(username string) (string error)
 	ConfirmForgotPassword(email string, newPassword string, username string, confirmationCode string) (string error)
-	ResendAdminCreateUser(email string, name string) (string error)
-	UpdateUserAttributes(email string, password string, newEmail string, newName string) (string error)
 }
 
 type awsCognitoClient struct {
@@ -57,10 +55,8 @@ type Event struct {
 	Password         string `json:"password"`
 	NewPassword      string `json:"newPassword"`
 	Name             string `json:"name"`
-	NewName          string `json:"newName"`
 	ConfirmationCode string `json:"confirmationCode"`
 	Case             int    `json:"case"`
-	NewEmail         string `json:"newEmail"`
 }
 
 func (d *deps) handler(ctx context.Context, event Event) (string, error) {
@@ -117,10 +113,6 @@ func (d *deps) handler(ctx context.Context, event Event) (string, error) {
 		result, err = client.ForgotPassword(event.Username)
 	case 13: // ConfirmForgotPassword
 		result, err = client.ConfirmForgotPassword(event.Email, event.NewPassword, event.Username, event.ConfirmationCode)
-	case 14: // ResendAdminCreateUser
-		result, err = client.ResendAdminCreateUser(event.Email, event.Name)
-	case 15: // UpdateUserAttributes
-		result, err = client.UpdateUserAttributes(event.Email, event.Password, event.NewEmail, event.NewName)
 	}
 
 	if err != nil {
@@ -179,6 +171,10 @@ func (ctx *awsCognitoClient) AdminCreateUser(email string, name string) (string,
 			{
 				Name:  aws.String("name"),
 				Value: aws.String(name),
+			},
+			{
+				Name:  aws.String("email_verified"),
+				Value: aws.String("true"),
 			},
 		},
 	}
@@ -452,79 +448,4 @@ func (ctx *awsCognitoClient) ConfirmForgotPassword(email string, newPassword str
 	}
 
 	return result2.String(), nil
-}
-
-func (ctx *awsCognitoClient) ResendAdminCreateUser(email string, name string) (string, error) {
-
-	user := &cognito.AdminCreateUserInput{
-		UserPoolId:    aws.String(ctx.userPoolId),
-		Username:      aws.String(email),
-		MessageAction: aws.String("RESEND"),
-		UserAttributes: []*cognito.AttributeType{
-			{
-				Name:  aws.String("email"),
-				Value: aws.String(email),
-			},
-			{
-				Name:  aws.String("name"),
-				Value: aws.String(name),
-			},
-		},
-	}
-	fmt.Println("USER: ", user)
-
-	result, err := ctx.cognitoClient.AdminCreateUser(user)
-	if err != nil {
-		fmt.Println("Error : AdminCreateUser", err)
-		return "", err
-	}
-	return result.String(), nil
-}
-
-func (ctx *awsCognitoClient) UpdateUserAttributes(email string, password string, newEmail string, newName string) (string, error) {
-
-	initiateAuthInput := &cognito.InitiateAuthInput{
-		AuthFlow: aws.String("USER_PASSWORD_AUTH"),
-		AuthParameters: aws.StringMap(map[string]string{
-			"USERNAME": email,
-			"PASSWORD": password,
-		}),
-		ClientId: aws.String(ctx.appClientId),
-	}
-
-	result, err := ctx.cognitoClient.InitiateAuth(initiateAuthInput)
-
-	if err != nil {
-		fmt.Println("Error  : InitiateAuth", err)
-		return "", err
-	}
-
-	fmt.Println(result)
-
-	updateUserAttributesInput := &cognito.UpdateUserAttributesInput{
-		AccessToken: aws.String(*result.AuthenticationResult.AccessToken),
-		UserAttributes: []*cognito.AttributeType{
-			{
-				Name:  aws.String("name"),
-				Value: aws.String(newName),
-			},
-			{
-				Name:  aws.String("email"),
-				Value: aws.String(newEmail),
-			},
-		},
-	}
-	fmt.Println("Error 111")
-
-	result2, err2 := ctx.cognitoClient.UpdateUserAttributes(updateUserAttributesInput)
-
-	fmt.Println(result2)
-
-	if err2 != nil {
-		fmt.Println("Error  : UpdateUserAttributes", err2)
-		return "", err2
-	}
-
-	return result2.String(), nil
-
 }
