@@ -20,8 +20,8 @@ type CognitoClient interface {
 	AdminCreateUser(email string) (string error)
 	AdminSetUserPassword(username string, password string) (string error)
 	SignIn(email string, password string) (string error)
-	ConfirmSignUp(email string, username string, confirmationCode string) (string error)
-	ResendConfirmationCode(email string, username string) (string error)
+	ConfirmSignUp(username string, confirmationCode string) (string error)
+	ResendConfirmationCode(username string) (string error)
 	getUser(email string) ([]Response, error)
 	ListUsers() ([]Response, error)
 	AdminGetUser(username string) (string error)
@@ -94,9 +94,9 @@ func (d *deps) handler(ctx context.Context, event Event) (string, error) {
 	case 3: // SignIn
 		result, err = client.SignIn(event.Email, event.Password)
 	case 4: // ResendConfirmationCode
-		result, err = client.ResendConfirmationCode(event.Email, event.Username)
+		result, err = client.ResendConfirmationCode(event.Username)
 	case 5: // ConfirmSignUp
-		result, err = client.ConfirmSignUp(event.Email, event.Username, event.ConfirmationCode)
+		result, err = client.ConfirmSignUp(event.Username, event.ConfirmationCode)
 	case 6: // GetUser
 		response, err = client.getUser(event.Email)
 	case 7: // ListUsers
@@ -224,7 +224,7 @@ func (ctx *awsCognitoClient) SignIn(email string, password string) (string, erro
 	return result.String(), nil
 }
 
-func (ctx *awsCognitoClient) ConfirmSignUp(email string, username string, confirmationCode string) (string, error) {
+func (ctx *awsCognitoClient) ConfirmSignUp(username string, confirmationCode string) (string, error) {
 
 	user := &cognito.ConfirmSignUpInput{
 		ClientId:         aws.String(ctx.appClientId),
@@ -240,7 +240,7 @@ func (ctx *awsCognitoClient) ConfirmSignUp(email string, username string, confir
 	return result.String(), nil
 }
 
-func (ctx *awsCognitoClient) ResendConfirmationCode(email string, username string) (string, error) {
+func (ctx *awsCognitoClient) ResendConfirmationCode(username string) (string, error) {
 
 	user := &cognito.ResendConfirmationCodeInput{
 		ClientId: aws.String(ctx.appClientId),
