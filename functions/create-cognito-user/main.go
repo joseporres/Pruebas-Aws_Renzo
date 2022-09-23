@@ -333,7 +333,7 @@ func (ctx *awsCognitoClient) AdminGetUser(username string) (string, error) {
 	return result.String(), nil
 }
 
-func (ctx awsCognitoClient) AdminDisableUser(username string) (string, error) {
+func (ctx *awsCognitoClient) AdminDisableUser(username string) (string, error) {
 
 	adminDisableUserInput := &cognito.AdminDisableUserInput{
 		UserPoolId: aws.String(ctx.userPoolId),
@@ -350,7 +350,7 @@ func (ctx awsCognitoClient) AdminDisableUser(username string) (string, error) {
 	return result.String(), nil
 }
 
-func (ctx awsCognitoClient) AdminEnableUser(username string) (string, error) {
+func (ctx *awsCognitoClient) AdminEnableUser(username string) (string, error) {
 
 	adminEnableUserInput := &cognito.AdminEnableUserInput{
 		UserPoolId: aws.String(ctx.userPoolId),
@@ -417,12 +417,12 @@ func (ctx *awsCognitoClient) ForgotPassword(username string) (string, error) {
 
 	result2, err2 := ctx.cognitoClient.ForgotPassword(forgotPasswordInput)
 
-	println(result2.CodeDeliveryDetails.DeliveryMedium)
-
 	if err2 != nil {
-		fmt.Println("Error  : ChangePassword", err2)
+		fmt.Println("Error  : ForgotPassword", err2)
 		return "", err2
 	}
+
+	println(result2.CodeDeliveryDetails.DeliveryMedium)
 
 	return result2.String(), nil
 }
