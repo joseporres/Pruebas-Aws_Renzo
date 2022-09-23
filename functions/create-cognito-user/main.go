@@ -30,6 +30,7 @@ type CognitoClient interface {
 	ChangePasswordUser(email string, password string, newPassword string) (string error)
 	ForgotPassword(username string) (string error)
 	ConfirmForgotPassword(email string, newPassword string, username string, confirmationCode string) (string error)
+	ResendAdminCreateUser(email string, name string) (string error)
 }
 
 type awsCognitoClient struct {
@@ -113,6 +114,8 @@ func (d *deps) handler(ctx context.Context, event Event) (string, error) {
 		result, err = client.ForgotPassword(event.Username)
 	case 13: // ConfirmForgotPassword
 		result, err = client.ConfirmForgotPassword(event.Email, event.NewPassword, event.Username, event.ConfirmationCode)
+	case 14: // ResendAdminCreateUser
+		result, err = client.ResendAdminCreateUser(event.Email, event.Name)
 	}
 
 	if err != nil {
@@ -444,4 +447,31 @@ func (ctx *awsCognitoClient) ConfirmForgotPassword(email string, newPassword str
 	}
 
 	return result2.String(), nil
+}
+
+func (ctx *awsCognitoClient) ResendAdminCreateUser(email string, name string) (string, error) {
+
+	user := &cognito.AdminCreateUserInput{
+		UserPoolId:    aws.String(ctx.userPoolId),
+		Username:      aws.String(email),
+		MessageAction: aws.String("RESEND"),
+		UserAttributes: []*cognito.AttributeType{
+			{
+				Name:  aws.String("email"),
+				Value: aws.String(email),
+			},
+			{
+				Name:  aws.String("name"),
+				Value: aws.String(name),
+			},
+		},
+	}
+	fmt.Println("USER: ", user)
+
+	result, err := ctx.cognitoClient.AdminCreateUser(user)
+	if err != nil {
+		fmt.Println("Error : AdminCreateUser", err)
+		return "", err
+	}
+	return result.String(), nil
 }
